@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  nighthost:
+    build: .
+    container_name: nighthost-minecraft-panel
+    ports:
+      - "4444:3000"     # Map host port 4444 to container port 3000
+      - "25565:25565"   # Minecraft server port
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    volumes:
+      - ./server-files:/app/server-files
+      - ./public/uploads:/app/public/uploads

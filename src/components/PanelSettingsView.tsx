@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { PanelSettings } from '../types';
 import { getThemeStyles, getCardBgClass } from '../utils/theme';
-import { Settings, Image as ImageIcon, Palette, Copy, Check, Upload, Sparkles, RefreshCw, Globe, Server, Sliders, Eye, Sun, Moon } from 'lucide-react';
+import { Settings, Image as ImageIcon, Palette, Copy, Check, Upload, Sparkles, RefreshCw, Globe, Server, Sliders, Eye, Sun, Moon, Terminal } from 'lucide-react';
 
 interface PanelSettingsViewProps {
   settings: PanelSettings;
@@ -71,6 +71,7 @@ export const PanelSettingsView: React.FC<PanelSettingsViewProps> = ({
   const [bgBlur, setBgBlur] = useState(settings.bgBlur ?? 4);
   const [themeColor, setThemeColor] = useState<PanelSettings['themeColor']>(settings.themeColor || 'emerald');
   const [hudTransparent, setHudTransparent] = useState<boolean>(settings.hudTransparent ?? true);
+  const [customJavaPath, setCustomJavaPath] = useState<string>(settings.customJavaPath || '');
 
   const [isUploading, setIsUploading] = useState(false);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
@@ -90,6 +91,7 @@ export const PanelSettingsView: React.FC<PanelSettingsViewProps> = ({
       bgBlur,
       themeColor,
       hudTransparent,
+      customJavaPath,
     };
 
     try {
@@ -259,6 +261,27 @@ export const PanelSettingsView: React.FC<PanelSettingsViewProps> = ({
               Displayed in header badge for quick copy-paste into Minecraft multiplayer.
             </p>
           </div>
+        </div>
+
+        {/* Custom VPS Java Path Input */}
+        <div className="pt-3 border-t border-slate-800/60 space-y-2">
+          <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Terminal className={`w-3.5 h-3.5 ${theme.textPrimary}`} />
+              <span>VPS Custom Java Executable Path (Optional)</span>
+            </span>
+            <span className="text-[10px] text-slate-500 font-mono">Default: Auto-Detect (java / OpenJDK 21)</span>
+          </label>
+          <input
+            type="text"
+            value={customJavaPath}
+            onChange={(e) => setCustomJavaPath(e.target.value)}
+            placeholder="e.g. /usr/bin/java or /usr/lib/jvm/java-21-openjdk-amd64/bin/java"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-slate-700"
+          />
+          <p className="text-[11px] text-slate-400">
+            Leave blank to let NightHost automatically locate <code className="text-emerald-400">java</code> or <code className="text-emerald-400">JAVA_HOME</code> installed on your VPS or Docker container.
+          </p>
         </div>
       </div>
 

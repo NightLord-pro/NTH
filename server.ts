@@ -37,6 +37,7 @@ let panelSettings = {
   bgBlur: 4,
   themeColor: 'emerald',
   hudTransparent: true,
+  customJavaPath: '',
   activeSoftware: 'Paper',
   activeVersion: '1.21.4',
 };
@@ -98,8 +99,8 @@ const io = new Server(server, {
 });
 
 app.use(express.static(path.join(process.cwd(), 'public')));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, PLUGINS_DIR),
@@ -160,18 +161,162 @@ function addLog(text: string, type: LogEntry['type'] = 'stdout') {
   }
 }
 
-// Helper function to check if Java exists in the environment
-function checkJavaAvailability(): boolean {
+// Helper function to check and resolve Java executable path on VPS or Docker
+function getJavaCmd(customPath?: string): string | null {
+  const customCandidate = customPath?.trim() || panelSettings.customJavaPath?.trim();
+
+  let whichResult = '';
   try {
-    execSync('java -version', { stdio: 'ignore' });
-    return true;
+    whichResult = execSync('which java', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch (e) {
+    // ignore
+  }
+
+  const candidates = [
+    customCandidate,
+    process.env.JAVA_PATH,
+    process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin', 'java') : '',
+    'java',
+    whichResult,
+    '/usr/bin/java',
+    '/usr/local/bin/java',
+    '/usr/lib/jvm/default-jvm/bin/java',
+    '/usr/lib/jvm/java-21-openjdk/bin/java',
+    '/usr/lib/jvm/java-21-openjdk-amd64/bin/java',
+    '/usr/lib/jvm/java-21-openjdk-arm64/bin/java',
+    '/usr/lib/jvm/java-17-openjdk-amd64/bin/java',
+    '/usr/lib/jvm/java-17-openjdk-arm64/bin/java',
+    '/opt/java/bin/java',
+    '/snap/bin/java',
+    'C:\\Program Files\\Java\\jdk-21\\bin\\java.exe',
+    'C:\\Program Files\\Java\\jdk-17\\bin\\java.exe',
+  ].filter(Boolean) as string[];
+
+  for (const cmd of candidates) {
+    try {
+      execSync(`"${cmd}" -version`, { stdio: 'ignore' });
+      return cmd;
+    } catch (e) {
+      // try next
+    }
+  }
+  return null;
+}
+
+function getJavaVersionInfo(javaCmd: string): string {
+  try {
+    const output = execSync(`"${javaCmd}" -version 2>&1`, { encoding: 'utf8' }).trim();
+    const firstLine = output.split('\n')[0] || output;
+    return firstLine;
+  } catch (e) {
+    return 'Java JDK detected';
+  }
+}
+
+function checkJavaAvailability(customPath?: string): boolean {
+  return getJavaCmd(customPath) !== null;
+}
+
+function isPaperJarValid(): boolean {
+  const paperJarPath = path.join(SERVER_DIR, 'paper.jar');
+  if (!fs.existsSync(paperJarPath)) return false;
+  try {
+    const stats = fs.statSync(paperJarPath);
+    if (stats.size < 100000) return false;
+
+    // Check PK magic bytes for zip/jar format
+    const fd = fs.openSync(paperJarPath, 'r');
+    const header = Buffer.alloc(4);
+    fs.readSync(fd, header, 0, 4, 0);
+    fs.closeSync(fd);
+    return header[0] === 0x50 && header[1] === 0x4b;
+  } catch {
     return false;
   }
 }
 
 function isPaperJarPresent(): boolean {
-  return fs.existsSync(path.join(SERVER_DIR, 'paper.jar'));
+  return isPaperJarValid();
+}
+
+async function downloadRealServerJar(software: string = 'PaperMC', version: string = '1.21.4'): Promise<{ success: boolean; sizeBytes: number; message: string }> {
+  const paperJarPath = path.join(SERVER_DIR, 'paper.jar');
+  const cleanVer = version.replace(/[^0-9.]/g, '') || '1.21.4';
+  let downloadUrl = '';
+
+  const swLower = software.toLowerCase();
+
+  if (swLower.includes('purpur')) {
+    downloadUrl = `https://api.purpurmc.org/v2/purpur/${cleanVer}/latest/download`;
+  } else {
+    // Default to PaperMC API
+    try {
+      const vRes = await fetch(`https://api.papermc.io/v2/projects/paper/versions/${cleanVer}`);
+      if (vRes.ok) {
+        const vData: any = await vRes.json();
+        if (vData.builds && Array.isArray(vData.builds) && vData.builds.length > 0) {
+          const latestBuild = vData.builds[vData.builds.length - 1];
+          downloadUrl = `https://api.papermc.io/v2/projects/paper/versions/${cleanVer}/builds/${latestBuild}/downloads/paper-${cleanVer}-${latestBuild}.jar`;
+        }
+      }
+    } catch (e) {
+      console.error('PaperMC API lookup error:', e);
+    }
+  }
+
+  // Fallback 1: Paper 1.21.4 latest build
+  if (!downloadUrl) {
+    try {
+      const fbRes = await fetch(`https://api.papermc.io/v2/projects/paper/versions/1.21.4`);
+      if (fbRes.ok) {
+        const fbData: any = await fbRes.json();
+        if (fbData.builds && Array.isArray(fbData.builds) && fbData.builds.length > 0) {
+          const latestBuild = fbData.builds[fbData.builds.length - 1];
+          downloadUrl = `https://api.papermc.io/v2/projects/paper/versions/1.21.4/builds/${latestBuild}/downloads/paper-1.21.4-${latestBuild}.jar`;
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Fallback 2: Direct URL
+  if (!downloadUrl) {
+    downloadUrl = 'https://api.papermc.io/v2/projects/paper/versions/1.21.4/builds/152/downloads/paper-1.21.4-152.jar';
+  }
+
+  addLog(`[JarDownloader]: Fetching real binary jar from ${downloadUrl}...`, 'info');
+
+  const fileRes = await fetch(downloadUrl, {
+    headers: {
+      'User-Agent': 'NightHost-Panel/1.0 (contact@nighthost.com)',
+    },
+    redirect: 'follow',
+  });
+
+  if (!fileRes.ok) {
+    throw new Error(`Failed to download server jar (HTTP ${fileRes.status}) from ${downloadUrl}`);
+  }
+
+  const contentType = fileRes.headers.get('content-type') || '';
+  if (contentType.includes('text/html')) {
+    throw new Error('Received HTML webpage instead of binary JAR file.');
+  }
+
+  const arrayBuffer = await fileRes.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  if (buffer.length < 100000) {
+    throw new Error(`Downloaded jar file size is too small (${buffer.length} bytes). File is corrupt.`);
+  }
+
+  fs.writeFileSync(paperJarPath, buffer);
+  const sizeMb = (buffer.length / (1024 * 1024)).toFixed(1);
+  addLog(`[JarDownloader]: Successfully downloaded real ${software} v${version} binary (${sizeMb} MB) into server-files/paper.jar!`, 'info');
+
+  return {
+    success: true,
+    sizeBytes: buffer.length,
+    message: `Installed ${software} v${version} (${sizeMb} MB) successfully!`,
+  };
 }
 
 function readServerProperties(): Record<string, string> {
@@ -211,6 +356,69 @@ function readJsonFile(filename: string): any[] {
   return [];
 }
 
+async function startMinecraftServer() {
+  if (mcServer) return;
+  const javaCmd = getJavaCmd();
+  if (!javaCmd) {
+    addLog('❌ ERROR: Java JDK is NOT installed or found in PATH!', 'error');
+    return;
+  }
+  if (!isPaperJarValid()) {
+    try {
+      await downloadRealServerJar(panelSettings.activeSoftware || 'PaperMC', panelSettings.activeVersion || '1.21.4');
+    } catch (e: any) {
+      addLog(`❌ Failed to auto-download PaperMC jar: ${e.message}`, 'error');
+      return;
+    }
+  }
+  fs.writeFileSync(eulaPath, 'eula=true\n');
+  currentState = 'STARTING';
+  serverStartTime = Date.now();
+  io.emit('server:state', currentState);
+  mcServer = spawn(javaCmd, [`-Xmx${maxRamGb}G`, `-Xms${minRamGb}G`, '-jar', 'paper.jar', 'nogui'], {
+    cwd: SERVER_DIR,
+    shell: true,
+  });
+  mcServer.stdout?.on('data', (data) => {
+    const str = data.toString();
+    io.emit('console-log', str);
+    addLog(str, 'stdout');
+    if (str.includes('Done (') && str.includes('For help, type "help"')) {
+      currentState = 'RUNNING';
+      io.emit('server:state', currentState);
+    }
+  });
+  mcServer.stderr?.on('data', (data) => {
+    io.emit('console-log', `[ERROR] ${data.toString()}`);
+    addLog(`[ERROR] ${data.toString()}`, 'stderr');
+  });
+  mcServer.on('close', (code) => {
+    mcServer = null;
+    currentState = 'STOPPED';
+    io.emit('server:state', currentState);
+  });
+}
+
+function stopMinecraftServer() {
+  if (mcServer && mcServer.stdin) {
+    mcServer.stdin.write('stop\n');
+    currentState = 'STOPPING';
+    io.emit('server:state', currentState);
+  } else {
+    currentState = 'STOPPED';
+    io.emit('server:state', currentState);
+  }
+}
+
+function killMinecraftServer() {
+  if (mcServer) {
+    mcServer.kill('SIGKILL');
+    mcServer = null;
+  }
+  currentState = 'STOPPED';
+  io.emit('server:state', currentState);
+}
+
 // Socket.io Handlers
 io.on('connection', (socket) => {
   console.log('Client connected to testing panel');
@@ -219,42 +427,65 @@ io.on('connection', (socket) => {
   socket.emit('console:history', logBuffer);
 
   // Socket event: start-server
-  socket.on('start-server', () => {
+  socket.on('start-server', async () => {
     if (mcServer) {
       socket.emit('console-log', '⚠️ Server is already running!\n');
       addLog('⚠️ Server is already running!', 'warn');
       return;
     }
 
-    // Guard Check: Agar environment mein Java nahi hai
-    if (!checkJavaAvailability()) {
-      socket.emit('console-log', '❌ ERROR: Java is NOT installed or this environment does not support Java processes!\n');
-      socket.emit('console-log', '💡 Note: Real Minecraft servers can only run on a proper VPS with Java JDK installed.\n');
-      addLog('❌ ERROR: Java is NOT installed or this environment does not support Java processes!', 'error');
-      addLog('💡 Note: Real Minecraft servers can only run on a proper VPS with Java JDK installed.', 'info');
+    // Guard Check: Resolve Java command on host / VPS / Docker
+    const javaCmd = getJavaCmd();
+    if (!javaCmd) {
+      socket.emit('console-log', '❌ ERROR: Java JDK is NOT installed or found in PATH on this VPS/server!\n');
+      socket.emit('console-log', '💡 Fix for Ubuntu/Debian VPS:\n   sudo apt update && sudo apt install -y openjdk-21-jre-headless\n');
+      socket.emit('console-log', '💡 Fix for Docker:\n   docker-compose up -d  (Uses included Dockerfile with OpenJDK 21)\n');
+      addLog('❌ ERROR: Java JDK/JRE is NOT installed on this VPS!', 'error');
       return;
     }
 
-    const jarPath = path.join(SERVER_DIR, 'paper.jar');
-    if (!fs.existsSync(jarPath)) {
-      socket.emit('console-log', '❌ Error: paper.jar not found in server-files/ directory!\n');
-      addLog('❌ Error: paper.jar not found in server-files/ directory!', 'error');
-      return;
+    // Auto-download / repair valid paper.jar if missing or corrupt
+    if (!isPaperJarValid()) {
+      socket.emit('console-log', '📦 Missing or corrupt paper.jar detected! Auto-downloading official PaperMC binary...\n');
+      addLog('📦 Missing or corrupt paper.jar detected! Auto-downloading official PaperMC binary...', 'warn');
+      try {
+        await downloadRealServerJar(panelSettings.activeSoftware || 'PaperMC', panelSettings.activeVersion || '1.21.4');
+        socket.emit('console-log', '✅ Official PaperMC jar binary successfully downloaded & ready!\n');
+      } catch (dlErr: any) {
+        socket.emit('console-log', `❌ Failed to auto-download PaperMC jar: ${dlErr.message}\n`);
+        socket.emit('console-log', '💡 Please upload a valid paper.jar in File Explorer or select a version in Versions Manager.\n');
+        addLog(`❌ Failed to auto-download PaperMC jar: ${dlErr.message}`, 'error');
+        return;
+      }
     }
 
     fs.writeFileSync(eulaPath, 'eula=true\n');
 
-    socket.emit('console-log', '🚀 Initializing real Java process on VPS...\n');
-    addLog('🚀 Initializing real Java process on VPS...', 'info');
+    const javaVerInfo = getJavaVersionInfo(javaCmd);
+    socket.emit('console-log', `☕ Java JDK: ${javaVerInfo}\n`);
+    socket.emit('console-log', `🚀 Launching Minecraft Java process on VPS using: ${javaCmd}...\n`);
+    addLog(`🚀 Launching Minecraft Java process on VPS using: ${javaCmd} (${javaVerInfo})`, 'info');
 
     currentState = 'STARTING';
     serverStartTime = Date.now();
     io.emit('server:state', currentState);
 
-    // Real Java Process Spawn
-    mcServer = spawn('java', [`-Xmx${maxRamGb}G`, `-Xms${minRamGb}G`, '-jar', 'paper.jar', 'nogui'], {
+    // Dynamic RAM flags calculation: -Xms512M -Xmx2G to avoid out-of-memory crash on low RAM VPS
+    const ramMaxArg = maxRamGb ? `-Xmx${maxRamGb}G` : '-Xmx2G';
+    const ramMinArg = minRamGb ? `-Xms${minRamGb}G` : '-Xms512M';
+
+    mcServer = spawn(javaCmd, [ramMaxArg, ramMinArg, '-jar', 'paper.jar', 'nogui'], {
       cwd: SERVER_DIR,
       shell: true,
+    });
+
+    mcServer.on('error', (err) => {
+      const errText = `❌ Failed to spawn Java process: ${err.message}`;
+      socket.emit('console-log', `${errText}\n`);
+      addLog(errText, 'error');
+      mcServer = null;
+      currentState = 'STOPPED';
+      io.emit('server:state', currentState);
     });
 
     mcServer.stdout?.on('data', (data) => {
@@ -279,6 +510,9 @@ io.on('connection', (socket) => {
 
     mcServer.on('close', (code) => {
       io.emit('console-log', `\n🛑 Server process exited with code ${code}\n`);
+      if (code !== 0 && code !== null) {
+        socket.emit('console-log', '💡 Tip: If server exited with code 1, check if your VPS has sufficient RAM or if paper.jar is corrupted.\n');
+      }
       addLog(`🛑 Server process exited with code ${code}`, code === 0 ? 'info' : 'error');
       mcServer = null;
       currentState = 'STOPPED';
@@ -535,16 +769,21 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-app.post('/api/server/action', (req, res) => {
+app.post('/api/server/action', async (req, res) => {
   const { action } = req.body;
   if (action === 'start') {
     if (!checkJavaAvailability()) {
       addLog('❌ ERROR: Java is NOT installed or this environment does not support Java processes!', 'error');
       return res.json({ success: false, message: 'Java not installed' });
     }
-    if (!isPaperJarPresent()) {
-      addLog('❌ Error: paper.jar not found in server-files/ directory!', 'error');
-      return res.json({ success: false, message: 'paper.jar missing' });
+    if (!isPaperJarValid()) {
+      addLog('📦 Auto-downloading official PaperMC jar binary...', 'warn');
+      try {
+        await downloadRealServerJar(panelSettings.activeSoftware || 'PaperMC', panelSettings.activeVersion || '1.21.4');
+      } catch (err: any) {
+        addLog(`❌ Failed to auto-download PaperMC jar: ${err.message}`, 'error');
+        return res.json({ success: false, message: 'paper.jar missing or corrupt' });
+      }
     }
 
     currentState = 'STARTING';
@@ -603,11 +842,8 @@ app.post('/api/server/action', (req, res) => {
 
 app.post('/api/server/download-paper', async (req, res) => {
   try {
-    const paperJarPath = path.join(SERVER_DIR, 'paper.jar');
-    const paperInfo = `PaperMC Server Jar Executable File\nCreated at ${new Date().toISOString()}`;
-    fs.writeFileSync(paperJarPath, paperInfo, 'utf8');
-    addLog('[PaperMC]: Created paper.jar in server-files/ directory!', 'info');
-    res.json({ success: true, message: 'paper.jar created successfully!' });
+    const downloadRes = await downloadRealServerJar(panelSettings.activeSoftware || 'PaperMC', panelSettings.activeVersion || '1.21.4');
+    res.json(downloadRes);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -698,6 +934,73 @@ app.post('/api/files/write', (req, res) => {
   }
 });
 
+const fileManagerStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const subFolder = (req.query.folder as string) || '';
+    const dest = path.normalize(path.join(SERVER_DIR, subFolder));
+    if (!dest.startsWith(SERVER_DIR)) {
+      return cb(null, SERVER_DIR);
+    }
+    if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+    cb(null, dest);
+  },
+  filename: (req, file, cb) => cb(null, file.originalname),
+});
+const fileManagerUpload = multer({ 
+  storage: fileManagerStorage, 
+  limits: { 
+    fileSize: 10 * 1024 * 1024 * 1024, // 10 GB max limit (unrestricted)
+    fieldSize: 100 * 1024 * 1024 
+  } 
+});
+
+app.post('/api/files/upload', fileManagerUpload.array('files'), (req, res) => {
+  try {
+    const files = req.files as Express.Multer.File[];
+    if (files && files.length > 0) {
+      files.forEach((f) => {
+        const subFolder = (req.query.folder as string) || '';
+        if (f.originalname.endsWith('.jar') && (!subFolder || subFolder === '')) {
+          fs.copyFileSync(f.path, path.join(SERVER_DIR, 'paper.jar'));
+          addLog(`[Panel]: Uploaded custom jar ${f.originalname} and configured as active server executable`, 'info');
+        }
+      });
+    }
+    res.json({ success: true, message: `Uploaded ${files ? files.length : 0} file(s) successfully!` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/files/rename', (req, res) => {
+  const { oldPath, newName } = req.body;
+  if (!oldPath || !newName || !newName.trim()) {
+    return res.status(400).json({ error: 'Missing oldPath or newName' });
+  }
+
+  const oldFullPath = path.normalize(path.join(SERVER_DIR, oldPath));
+  const dirName = path.dirname(oldFullPath);
+  const newFullPath = path.normalize(path.join(dirName, newName.trim()));
+
+  if (!oldFullPath.startsWith(SERVER_DIR) || !newFullPath.startsWith(SERVER_DIR)) {
+    return res.status(403).json({ error: 'Unauthorized path access' });
+  }
+
+  try {
+    if (!fs.existsSync(oldFullPath)) {
+      return res.status(404).json({ error: 'File or folder not found' });
+    }
+    if (fs.existsSync(newFullPath)) {
+      return res.status(400).json({ error: 'A file or folder with that name already exists' });
+    }
+    fs.renameSync(oldFullPath, newFullPath);
+    addLog(`[Panel]: Renamed ${oldPath} -> ${newName.trim()}`, 'info');
+    res.json({ success: true, message: `Renamed to ${newName.trim()}` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/api/files/delete', (req, res) => {
   const relPath = (req.query.path as string) || '';
   const filePath = path.normalize(path.join(SERVER_DIR, relPath));
@@ -780,21 +1083,19 @@ app.post('/api/server/version/install', async (req, res) => {
       return res.status(400).json({ error: 'Missing software or version name' });
     }
 
-    const paperJarPath = path.join(SERVER_DIR, 'paper.jar');
-    const headerContent = `${software} ${version} Executable Server Jar\nUpdated via Versions Manager at ${new Date().toISOString()}`;
-    fs.writeFileSync(paperJarPath, headerContent, 'utf8');
+    const downloadRes = await downloadRealServerJar(software, version);
 
     panelSettings.activeSoftware = software;
     panelSettings.activeVersion = version;
     saveSettings();
     io.emit('panel:settings', panelSettings);
 
-    addLog(`[VersionsManager]: Installed and switched server software to ${software} v${version}!`, 'info');
+    addLog(`[VersionsManager]: Downloaded & installed ${software} v${version}!`, 'info');
     res.json({
       success: true,
       software,
       version,
-      message: `Successfully installed ${software} ${version}!`,
+      message: downloadRes.message,
     });
   } catch (err: any) {
     addLog(`[VersionsManager Error]: ${err.message}`, 'error');

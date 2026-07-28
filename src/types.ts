@@ -67,6 +67,7 @@ export interface PanelSettings {
   bgBlur: number;
   themeColor: 'emerald' | 'cyan' | 'violet' | 'amber' | 'rose' | 'indigo';
   hudTransparent?: boolean;
+  customJavaPath?: string;
   activeSoftware: string;
   activeVersion: string;
 }

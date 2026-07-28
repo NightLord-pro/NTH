@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FileItem } from '../types';
-import { Folder, FileText, ChevronRight, Save, Trash2, FilePlus, FolderPlus, Download, ArrowLeft, RefreshCw, X, Edit3 } from 'lucide-react';
+import { Folder, FileText, ChevronRight, Save, Trash2, FilePlus, FolderPlus, Download, ArrowLeft, RefreshCw, X, Edit3, Upload, Edit } from 'lucide-react';
 
 export const FileExplorer: React.FC = () => {
   const [currentPath, setCurrentPath] = useState('');
@@ -9,11 +9,23 @@ export const FileExplorer: React.FC = () => {
   const [fileContent, setFileContent] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
+  // New File Modal
   const [newFileName, setNewFileName] = useState('');
   const [showNewFileModal, setShowNewFileModal] = useState(false);
+
+  // New Folder Modal
   const [newFolderName, setNewFolderName] = useState('');
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
+
+  // Rename Modal
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [itemToRename, setItemToRename] = useState<FileItem | null>(null);
+  const [renameNewName, setRenameNewName] = useState('');
+
   const [statusMsg, setStatusMsg] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchFiles = async (path: string = currentPath) => {
     try {
@@ -98,6 +110,104 @@ export const FileExplorer: React.FC = () => {
     }
   };
 
+  const handleOpenRenameModal = (item: FileItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setItemToRename(item);
+    setRenameNewName(item.name);
+    setShowRenameModal(true);
+  };
+
+  const handleRenameItem = async () => {
+    if (!itemToRename || !renameNewName.trim()) return;
+
+    try {
+      const res = await fetch('/api/files/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          oldPath: itemToRename.path,
+          newName: renameNewName.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMsg(`Renamed to ${renameNewName.trim()}`);
+        setShowRenameModal(false);
+        setItemToRename(null);
+        setRenameNewName('');
+        fetchFiles();
+      } else {
+        setStatusMsg(`Rename failed: ${data.error || 'Error'}`);
+      }
+    } catch {
+      setStatusMsg('Failed to rename item');
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const uploadedFiles = e.target.files;
+    if (!uploadedFiles || uploadedFiles.length === 0) return;
+
+    setIsUploading(true);
+    setStatusMsg(`Uploading ${uploadedFiles.length} file(s) (Unlimited Size)...`);
+
+    const formData = new FormData();
+    for (let i = 0; i < uploadedFiles.length; i++) {
+      formData.append('files', uploadedFiles[i]);
+    }
+
+    try {
+      const res = await fetch(`/api/files/upload?folder=${encodeURIComponent(currentPath)}`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMsg(data.message || 'Files uploaded successfully!');
+        fetchFiles();
+      } else {
+        setStatusMsg(`Upload error: ${data.error || 'Failed'}`);
+      }
+    } catch {
+      setStatusMsg('Upload failed');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    const droppedFiles = e.dataTransfer.files;
+    if (!droppedFiles || droppedFiles.length === 0) return;
+
+    setIsUploading(true);
+    setStatusMsg(`Uploading ${droppedFiles.length} dropped file(s)...`);
+
+    const formData = new FormData();
+    for (let i = 0; i < droppedFiles.length; i++) {
+      formData.append('files', droppedFiles[i]);
+    }
+
+    try {
+      const res = await fetch(`/api/files/upload?folder=${encodeURIComponent(currentPath)}`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMsg(data.message || 'Files uploaded successfully!');
+        fetchFiles();
+      } else {
+        setStatusMsg(`Upload error: ${data.error || 'Failed'}`);
+      }
+    } catch {
+      setStatusMsg('Upload failed');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleCreateNewFile = async () => {
     if (!newFileName.trim()) return;
     const targetPath = currentPath ? `${currentPath}/${newFileName.trim()}` : newFileName.trim();
@@ -146,16 +256,31 @@ export const FileExplorer: React.FC = () => {
     if (bytes === 0) return '0 B';
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   };
 
   return (
     <div className="space-y-4">
+      {/* Hidden File Input for Unlimited Uploads */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        multiple
+        className="hidden"
+      />
       
       {/* Notification Toast */}
       {statusMsg && (
-        <div className="bg-emerald-950/90 border border-emerald-500/50 text-emerald-200 px-4 py-2 rounded-xl text-xs font-medium shadow-lg animate-fade-in flex items-center justify-between">
-          <span>{statusMsg}</span>
+        <div className="bg-emerald-950/90 border border-emerald-500/50 text-emerald-200 px-4 py-2.5 rounded-xl text-xs font-medium shadow-lg animate-fade-in flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            {isUploading && <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />}
+            {statusMsg}
+          </span>
+          <button onClick={() => setStatusMsg('')} className="p-0.5 text-emerald-400 hover:text-emerald-100">
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
@@ -186,8 +311,8 @@ export const FileExplorer: React.FC = () => {
           })}
         </div>
 
-        {/* Action buttons */}
-        <div className="flex items-center gap-2">
+        {/* Action Buttons Toolbar */}
+        <div className="flex items-center gap-2 flex-wrap">
           {currentPath && (
             <button
               onClick={() => {
@@ -201,6 +326,16 @@ export const FileExplorer: React.FC = () => {
               <span>Back</span>
             </button>
           )}
+
+          {/* Direct File Upload Button - No File Size Limit */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-lg shadow-emerald-950/40"
+          >
+            {isUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+            <span>Upload Files</span>
+          </button>
 
           <button
             onClick={() => setShowNewFileModal(true)}
@@ -223,25 +358,35 @@ export const FileExplorer: React.FC = () => {
       {/* Main File Explorer Grid / Split View */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         
-        {/* File Tree List */}
-        <div className={`bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl ${isEditing ? 'lg:col-span-5' : 'lg:col-span-12'}`}>
+        {/* File Tree List with Drag and Drop */}
+        <div 
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+          className={`bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl ${isEditing ? 'lg:col-span-5' : 'lg:col-span-12'}`}
+        >
           <div className="bg-slate-950 px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300 font-mono">
-              Files in /server-files/{currentPath}
+            <span className="text-xs font-bold text-slate-300 font-mono flex items-center gap-2">
+              <span>Files in /server-files/{currentPath}</span>
+              <span className="text-[10px] bg-slate-800 text-emerald-400 px-2 py-0.5 rounded-md font-sans">No Size Limits</span>
             </span>
             <span className="text-[11px] text-slate-500 font-mono">{files.length} items</span>
           </div>
 
           <div className="divide-y divide-slate-800/60 max-h-[600px] overflow-y-auto">
             {files.length === 0 ? (
-              <div className="p-8 text-center text-slate-500 text-xs font-mono">
-                Folder is empty.
+              <div 
+                onClick={() => fileInputRef.current?.click()}
+                className="p-12 text-center text-slate-500 text-xs font-mono cursor-pointer hover:bg-slate-800/30 transition-colors border-2 border-dashed border-slate-800/80 m-4 rounded-xl flex flex-col items-center justify-center gap-2"
+              >
+                <Upload className="w-6 h-6 text-emerald-400/80 mb-1" />
+                <p className="text-slate-300 font-semibold">Folder is empty</p>
+                <p className="text-slate-500 text-[11px]">Click or drag & drop files here to upload (Any size supported)</p>
               </div>
             ) : (
               files.map((item) => (
                 <div
                   key={item.path}
-                  className={`p-3 flex items-center justify-between hover:bg-slate-800/40 transition-colors cursor-pointer ${
+                  className={`p-3 flex items-center justify-between hover:bg-slate-800/40 transition-colors cursor-pointer group ${
                     selectedFile === item.path ? 'bg-slate-800/80 border-l-2 border-emerald-500' : ''
                   }`}
                   onClick={() => handleOpenFile(item)}
@@ -255,16 +400,27 @@ export const FileExplorer: React.FC = () => {
                     <span className="text-xs font-mono text-slate-200 truncate">{item.name}</span>
                   </div>
 
-                  <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
                     {!item.isDirectory && (
-                      <span className="text-[11px] font-mono text-slate-500">{formatSize(item.sizeBytes)}</span>
+                      <span className="text-[11px] font-mono text-slate-500 mr-1">{formatSize(item.sizeBytes)}</span>
                     )}
+
+                    {/* Rename Button */}
+                    <button
+                      onClick={(e) => handleOpenRenameModal(item, e)}
+                      className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-amber-300 rounded-lg transition-colors"
+                      title="Rename"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                    </button>
+
+                    {/* Delete Button */}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDeleteItem(item.path);
                       }}
-                      className="p-1 hover:bg-rose-950 text-slate-500 hover:text-rose-300 rounded transition-colors"
+                      className="p-1.5 hover:bg-rose-950 text-slate-400 hover:text-rose-300 rounded-lg transition-colors"
                       title="Delete"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -318,6 +474,46 @@ export const FileExplorer: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Rename File/Folder Modal */}
+      {showRenameModal && itemToRename && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <Edit className="w-5 h-5 text-amber-400" /> Rename {itemToRename.isDirectory ? 'Folder' : 'File'}
+            </h3>
+            <p className="text-xs text-slate-400 font-mono">Current: {itemToRename.name}</p>
+            <input
+              type="text"
+              placeholder="New name..."
+              value={renameNewName}
+              onChange={(e) => setRenameNewName(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-amber-500"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleRenameItem();
+              }}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowRenameModal(false);
+                  setItemToRename(null);
+                }}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRenameItem}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Rename
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* New File Modal */}
       {showNewFileModal && (
