@@ -1,0 +1,6 @@
+{
+  "name": "NightHost (NTH)",
+  "description": "Full-stack web control panel for NightHost (NTH) Minecraft Paper 1.21.x server hosting with World Manager, Backup Manager, Pterodactyl API, SpigotMC/Modrinth, and real-time WebSocket console.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
