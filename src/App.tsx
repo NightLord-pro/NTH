@@ -155,7 +155,6 @@ export default function App() {
   const handleSendCommand = (cmd: string) => {
     if (socket) {
       socket.emit('send-command', cmd);
-      socket.emit('command', cmd);
     }
   };
 

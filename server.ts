@@ -242,81 +242,114 @@ function isPaperJarPresent(): boolean {
 async function downloadRealServerJar(software: string = 'PaperMC', version: string = '1.21.4'): Promise<{ success: boolean; sizeBytes: number; message: string }> {
   const paperJarPath = path.join(SERVER_DIR, 'paper.jar');
   const cleanVer = version.replace(/[^0-9.]/g, '') || '1.21.4';
-  let downloadUrl = '';
-
   const swLower = software.toLowerCase();
 
+  const candidateUrls: string[] = [];
+
+  // 1. Purpur endpoint if purpur requested
   if (swLower.includes('purpur')) {
-    downloadUrl = `https://api.purpurmc.org/v2/purpur/${cleanVer}/latest/download`;
-  } else {
-    // Default to PaperMC API
-    try {
-      const vRes = await fetch(`https://api.papermc.io/v2/projects/paper/versions/${cleanVer}`);
-      if (vRes.ok) {
-        const vData: any = await vRes.json();
-        if (vData.builds && Array.isArray(vData.builds) && vData.builds.length > 0) {
-          const latestBuild = vData.builds[vData.builds.length - 1];
-          downloadUrl = `https://api.papermc.io/v2/projects/paper/versions/${cleanVer}/builds/${latestBuild}/downloads/paper-${cleanVer}-${latestBuild}.jar`;
+    candidateUrls.push(`https://api.purpurmc.org/v2/purpur/${cleanVer}/latest/download`);
+    candidateUrls.push(`https://api.purpurmc.org/v2/purpur/1.21.4/latest/download`);
+    candidateUrls.push(`https://api.purpurmc.org/v2/purpur/1.20.4/latest/download`);
+  }
+
+  // 2. Fetch latest build for cleanVer from PaperMC API
+  try {
+    const vRes = await fetch(`https://api.papermc.io/v2/projects/paper/versions/${cleanVer}`);
+    if (vRes.ok) {
+      const vData: any = await vRes.json();
+      if (vData.builds && Array.isArray(vData.builds) && vData.builds.length > 0) {
+        const latestBuild = vData.builds[vData.builds.length - 1];
+        candidateUrls.push(`https://api.papermc.io/v2/projects/paper/versions/${cleanVer}/builds/${latestBuild}/downloads/paper-${cleanVer}-${latestBuild}.jar`);
+      }
+    }
+  } catch (e) {
+    console.error('PaperMC version lookup error:', e);
+  }
+
+  // 3. Query PaperMC project endpoint to find all supported versions & latest builds dynamically
+  try {
+    const pRes = await fetch('https://api.papermc.io/v2/projects/paper');
+    if (pRes.ok) {
+      const pData: any = await pRes.json();
+      if (pData.versions && Array.isArray(pData.versions) && pData.versions.length > 0) {
+        // Try latest 3 paper versions
+        const recentVersions = pData.versions.slice(-3).reverse();
+        for (const ver of recentVersions) {
+          try {
+            const bRes = await fetch(`https://api.papermc.io/v2/projects/paper/versions/${ver}`);
+            if (bRes.ok) {
+              const bData: any = await bRes.json();
+              if (bData.builds && Array.isArray(bData.builds) && bData.builds.length > 0) {
+                const bNum = bData.builds[bData.builds.length - 1];
+                candidateUrls.push(`https://api.papermc.io/v2/projects/paper/versions/${ver}/builds/${bNum}/downloads/paper-${ver}-${bNum}.jar`);
+              }
+            }
+          } catch {}
         }
       }
-    } catch (e) {
-      console.error('PaperMC API lookup error:', e);
+    }
+  } catch (e) {
+    console.error('PaperMC project lookup error:', e);
+  }
+
+  // 4. Always add Purpur fallback endpoints (Purpur is super reliable and fast)
+  candidateUrls.push(`https://api.purpurmc.org/v2/purpur/1.21.4/latest/download`);
+  candidateUrls.push(`https://api.purpurmc.org/v2/purpur/1.21.1/latest/download`);
+  candidateUrls.push(`https://api.purpurmc.org/v2/purpur/1.20.4/latest/download`);
+
+  // Remove duplicates
+  const uniqueUrls = Array.from(new Set(candidateUrls));
+
+  let lastError = 'No candidate download URL succeeded';
+
+  for (const downloadUrl of uniqueUrls) {
+    try {
+      addLog(`[JarDownloader]: Trying download from ${downloadUrl}...`, 'info');
+      const fileRes = await fetch(downloadUrl, {
+        headers: {
+          'User-Agent': 'NightHost-Panel/1.0 (Minecraft Server Hosting)',
+        },
+        redirect: 'follow',
+      });
+
+      if (!fileRes.ok) {
+        addLog(`[JarDownloader]: HTTP ${fileRes.status} on ${downloadUrl}, trying next candidate...`, 'warn');
+        lastError = `HTTP ${fileRes.status} from ${downloadUrl}`;
+        continue;
+      }
+
+      const contentType = fileRes.headers.get('content-type') || '';
+      if (contentType.includes('text/html') || contentType.includes('application/json')) {
+        addLog(`[JarDownloader]: Unexpected content-type (${contentType}) from ${downloadUrl}`, 'warn');
+        continue;
+      }
+
+      const arrayBuffer = await fileRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      // Verify PK header and size (>100KB)
+      if (buffer.length < 100000 || buffer[0] !== 0x50 || buffer[1] !== 0x4b) {
+        addLog(`[JarDownloader]: Invalid jar binary header or size (${buffer.length} bytes) from ${downloadUrl}`, 'warn');
+        continue;
+      }
+
+      fs.writeFileSync(paperJarPath, buffer);
+      const sizeMb = (buffer.length / (1024 * 1024)).toFixed(1);
+      addLog(`[JarDownloader]: Successfully downloaded real ${software} binary (${sizeMb} MB) into server-files/paper.jar!`, 'info');
+
+      return {
+        success: true,
+        sizeBytes: buffer.length,
+        message: `Installed ${software} (${sizeMb} MB) successfully!`,
+      };
+    } catch (err: any) {
+      addLog(`[JarDownloader]: Failed download from ${downloadUrl}: ${err.message}`, 'warn');
+      lastError = err.message;
     }
   }
 
-  // Fallback 1: Paper 1.21.4 latest build
-  if (!downloadUrl) {
-    try {
-      const fbRes = await fetch(`https://api.papermc.io/v2/projects/paper/versions/1.21.4`);
-      if (fbRes.ok) {
-        const fbData: any = await fbRes.json();
-        if (fbData.builds && Array.isArray(fbData.builds) && fbData.builds.length > 0) {
-          const latestBuild = fbData.builds[fbData.builds.length - 1];
-          downloadUrl = `https://api.papermc.io/v2/projects/paper/versions/1.21.4/builds/${latestBuild}/downloads/paper-1.21.4-${latestBuild}.jar`;
-        }
-      }
-    } catch (e) {}
-  }
-
-  // Fallback 2: Direct URL
-  if (!downloadUrl) {
-    downloadUrl = 'https://api.papermc.io/v2/projects/paper/versions/1.21.4/builds/152/downloads/paper-1.21.4-152.jar';
-  }
-
-  addLog(`[JarDownloader]: Fetching real binary jar from ${downloadUrl}...`, 'info');
-
-  const fileRes = await fetch(downloadUrl, {
-    headers: {
-      'User-Agent': 'NightHost-Panel/1.0 (contact@nighthost.com)',
-    },
-    redirect: 'follow',
-  });
-
-  if (!fileRes.ok) {
-    throw new Error(`Failed to download server jar (HTTP ${fileRes.status}) from ${downloadUrl}`);
-  }
-
-  const contentType = fileRes.headers.get('content-type') || '';
-  if (contentType.includes('text/html')) {
-    throw new Error('Received HTML webpage instead of binary JAR file.');
-  }
-
-  const arrayBuffer = await fileRes.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-
-  if (buffer.length < 100000) {
-    throw new Error(`Downloaded jar file size is too small (${buffer.length} bytes). File is corrupt.`);
-  }
-
-  fs.writeFileSync(paperJarPath, buffer);
-  const sizeMb = (buffer.length / (1024 * 1024)).toFixed(1);
-  addLog(`[JarDownloader]: Successfully downloaded real ${software} v${version} binary (${sizeMb} MB) into server-files/paper.jar!`, 'info');
-
-  return {
-    success: true,
-    sizeBytes: buffer.length,
-    message: `Installed ${software} v${version} (${sizeMb} MB) successfully!`,
-  };
+  throw new Error(`Failed to download server jar: ${lastError}`);
 }
 
 function readServerProperties(): Record<string, string> {
@@ -356,8 +389,31 @@ function readJsonFile(filename: string): any[] {
   return [];
 }
 
+function cleanSessionLocks(dirPath: string = SERVER_DIR) {
+  try {
+    if (!fs.existsSync(dirPath)) return;
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        cleanSessionLocks(fullPath);
+      } else if (entry.isFile() && entry.name === 'session.lock') {
+        try {
+          fs.unlinkSync(fullPath);
+          addLog(`[System]: Automatically cleared stale ${path.relative(SERVER_DIR, fullPath)}`, 'info');
+        } catch (err: any) {
+          console.error(`Failed to delete lock file ${fullPath}:`, err.message);
+        }
+      }
+    }
+  } catch (err: any) {
+    console.error('Error cleaning session locks:', err.message);
+  }
+}
+
 async function startMinecraftServer() {
   if (mcServer) return;
+  cleanSessionLocks();
   const javaCmd = getJavaCmd();
   if (!javaCmd) {
     addLog('❌ ERROR: Java JDK is NOT installed or found in PATH!', 'error');
@@ -459,6 +515,9 @@ io.on('connection', (socket) => {
       }
     }
 
+    // Clear stale session lock files left from crashed/aborted sessions
+    cleanSessionLocks();
+
     fs.writeFileSync(eulaPath, 'eula=true\n');
 
     const javaVerInfo = getJavaVersionInfo(javaCmd);
@@ -521,15 +580,23 @@ io.on('connection', (socket) => {
   });
 
   // Socket event: send-command
-  socket.on('send-command', (command: string) => {
+  const processCommand = (command: string) => {
+    const cleanCmd = (command || '').trim();
+    if (!cleanCmd) return;
+    const execCmd = cleanCmd.startsWith('/') ? cleanCmd.substring(1) : cleanCmd;
+
     if (mcServer && mcServer.stdin) {
-      mcServer.stdin.write(`${command}\n`);
-      addLog(`> /${command}`, 'command');
+      mcServer.stdin.write(`${execCmd}\n`);
+      socket.emit('console-log', `> /${execCmd}\n`);
+      addLog(`> /${execCmd}`, 'command');
     } else {
-      socket.emit('console-log', '⚠️ Cannot send command. Server is offline or environment blocked it!\n');
-      addLog('⚠️ Cannot send command. Server is offline or environment blocked it!', 'warn');
+      socket.emit('console-log', `⚠️ Cannot send command '/${execCmd}'. Server is offline! Click Start to boot server.\n`);
+      addLog(`⚠️ Cannot send command '/${execCmd}'. Server is offline!`, 'warn');
     }
-  });
+  };
+
+  socket.on('send-command', processCommand);
+  socket.on('command', processCommand);
 
   // Socket event: stop-server
   socket.on('stop-server', () => {
@@ -540,15 +607,6 @@ io.on('connection', (socket) => {
       addLog('[Server/INFO]: Stopping server...', 'info');
     } else {
       socket.emit('console-log', '⚠️ Cannot stop server. Server is not running!\n');
-    }
-  });
-
-  socket.on('command', (cmd: string) => {
-    if (mcServer && mcServer.stdin) {
-      mcServer.stdin.write(`${cmd}\n`);
-      addLog(`> /${cmd}`, 'command');
-    } else {
-      socket.emit('console-log', '⚠️ Cannot send command. Server is offline!\n');
     }
   });
 });
