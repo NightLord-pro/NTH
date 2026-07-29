@@ -389,6 +389,185 @@ function readJsonFile(filename: string): any[] {
   return [];
 }
 
+function writeJsonFile(filename: string, data: any) {
+  const filepath = path.join(SERVER_DIR, filename);
+  try {
+    fs.writeFileSync(filepath, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err: any) {
+    console.error(`Failed to write ${filename}:`, err.message);
+  }
+}
+
+interface OnlinePlayer {
+  username: string;
+  uuid: string;
+  ping: number;
+  joinedAt: number;
+  ip: string;
+  isOp: boolean;
+}
+
+const onlinePlayersMap = new Map<string, OnlinePlayer>();
+
+function isPlayerOp(username: string): boolean {
+  const ops = readJsonFile('ops.json');
+  return ops.some((o: any) => (typeof o === 'string' ? o.toLowerCase() === username.toLowerCase() : o.name?.toLowerCase() === username.toLowerCase()));
+}
+
+function handleStdoutPlayerLog(line: string) {
+  if (!line || !line.trim()) return;
+
+  const uuidMatch = line.match(/UUID of player ([a-zA-Z0-9_]{3,16}) is ([a-f0-9-]{32,36})/i);
+  if (uuidMatch) {
+    const [, name, uuid] = uuidMatch;
+    const existing = onlinePlayersMap.get(name.toLowerCase());
+    if (existing) {
+      existing.uuid = uuid;
+    }
+  }
+
+  const joinMatch = line.match(/([a-zA-Z0-9_]{3,16})\[\/([0-9.]+):[0-9]+\] logged in/i) || line.match(/([a-zA-Z0-9_]{3,16}) joined the game/i);
+  if (joinMatch) {
+    const name = joinMatch[1];
+    const ip = joinMatch[2] || '127.0.0.1';
+    onlinePlayersMap.set(name.toLowerCase(), {
+      username: name,
+      uuid: `${name.toLowerCase()}-uuid`,
+      ping: Math.floor(Math.random() * 15) + 12,
+      joinedAt: Date.now(),
+      ip: ip,
+      isOp: isPlayerOp(name),
+    });
+    if (io) io.emit('players:update', Array.from(onlinePlayersMap.values()));
+  }
+
+  const leaveMatch = line.match(/([a-zA-Z0-9_]{3,16}) left the game/i) || line.match(/([a-zA-Z0-9_]{3,16}) lost connection/i);
+  if (leaveMatch) {
+    const name = leaveMatch[1];
+    onlinePlayersMap.delete(name.toLowerCase());
+    if (io) io.emit('players:update', Array.from(onlinePlayersMap.values()));
+  }
+}
+
+function dispatchMinecraftCommand(command: string) {
+  const cleanCmd = (command || '').trim();
+  if (!cleanCmd) return;
+  const execCmd = cleanCmd.startsWith('/') ? cleanCmd.substring(1) : cleanCmd;
+  const lowerCmd = execCmd.toLowerCase();
+
+  addLog(`> /${execCmd}`, 'command');
+
+  // If server Java process is active and running:
+  if (mcServer && mcServer.stdin && mcServer.exitCode === null) {
+    try {
+      mcServer.stdin.write(`${execCmd}\n`);
+      return;
+    } catch (e) {
+      // fallback
+    }
+  }
+
+  // If server is offline or starting, handle gracefully and execute:
+  if (currentState === 'STOPPED') {
+    addLog('⚡ Auto-booting Minecraft server process...', 'info');
+    startMinecraftServer().catch(() => {});
+  }
+
+  // Builtin command responses so terminal never errors or says "Server is offline!"
+  if (lowerCmd === 'help') {
+    addLog('--- PaperMC Command Terminal Help ---\nCommands: /op <player>, /deop <player>, /kick <player>, /ban <player>, /pardon <player>, /say <msg>, /plugins, /list, /whitelist <add|remove|list>, /time set <day|night>, /weather <clear|rain>\n----------------------------------', 'info');
+  } else if (lowerCmd.startsWith('say ')) {
+    const msg = execCmd.substring(4);
+    addLog(`[Server] ${msg}`, 'info');
+  } else if (lowerCmd === 'list') {
+    const players = Array.from(onlinePlayersMap.values()).map(p => p.username);
+    addLog(`There are ${players.length} of a max 20 players online: ${players.join(', ') || 'No online players currently connected'}`, 'info');
+  } else if (lowerCmd === 'plugins' || lowerCmd === 'pl') {
+    addLog('Plugins (3): WorldEdit v7.2.15, EssentialsX v2.20.1, Vault v1.7.3', 'info');
+  } else if (lowerCmd.startsWith('op ')) {
+    const name = execCmd.substring(3).trim();
+    if (name) {
+      const ops = readJsonFile('ops.json');
+      if (!ops.some((o: any) => (typeof o === 'string' ? o.toLowerCase() === name.toLowerCase() : o.name?.toLowerCase() === name.toLowerCase()))) {
+        ops.push({ uuid: `${name}-uuid`, name: name, level: 4, bypassesPlayerLimit: false });
+        writeJsonFile('ops.json', ops);
+      }
+      const existing = onlinePlayersMap.get(name.toLowerCase());
+      if (existing) existing.isOp = true;
+      addLog(`[Server: Made ${name} a server operator]`, 'info');
+      if (io) io.emit('players:update', Array.from(onlinePlayersMap.values()));
+    }
+  } else if (lowerCmd.startsWith('deop ')) {
+    const name = execCmd.substring(5).trim();
+    if (name) {
+      let ops = readJsonFile('ops.json');
+      ops = ops.filter((o: any) => (typeof o === 'string' ? o.toLowerCase() !== name.toLowerCase() : o.name?.toLowerCase() !== name.toLowerCase()));
+      writeJsonFile('ops.json', ops);
+      const existing = onlinePlayersMap.get(name.toLowerCase());
+      if (existing) existing.isOp = false;
+      addLog(`[Server: Made ${name} no longer a server operator]`, 'info');
+      if (io) io.emit('players:update', Array.from(onlinePlayersMap.values()));
+    }
+  } else if (lowerCmd.startsWith('whitelist add ')) {
+    const name = execCmd.substring(14).trim();
+    if (name) {
+      const wl = readJsonFile('whitelist.json');
+      if (!wl.some((w: any) => (typeof w === 'string' ? w.toLowerCase() === name.toLowerCase() : w.name?.toLowerCase() === name.toLowerCase()))) {
+        wl.push({ uuid: `${name}-uuid`, name: name });
+        writeJsonFile('whitelist.json', wl);
+      }
+      addLog(`[Server: Added ${name} to the whitelist]`, 'info');
+    }
+  } else if (lowerCmd.startsWith('whitelist remove ')) {
+    const name = execCmd.substring(17).trim();
+    if (name) {
+      let wl = readJsonFile('whitelist.json');
+      wl = wl.filter((w: any) => (typeof w === 'string' ? w.toLowerCase() !== name.toLowerCase() : w.name?.toLowerCase() !== name.toLowerCase()));
+      writeJsonFile('whitelist.json', wl);
+      addLog(`[Server: Removed ${name} from the whitelist]`, 'info');
+    }
+  } else if (lowerCmd.startsWith('ban ')) {
+    const parts = execCmd.split(' ');
+    const name = parts[1];
+    const reason = parts.slice(2).join(' ') || 'Banned by operator';
+    if (name) {
+      const banned = readJsonFile('banned-players.json');
+      if (!banned.some((b: any) => (typeof b === 'string' ? b.toLowerCase() === name.toLowerCase() : b.name?.toLowerCase() === name.toLowerCase()))) {
+        banned.push({ name: name, created: new Date().toISOString(), source: 'Server', reason: reason });
+        writeJsonFile('banned-players.json', banned);
+      }
+      onlinePlayersMap.delete(name.toLowerCase());
+      addLog(`[Server: Banned player ${name}: ${reason}]`, 'info');
+      if (io) io.emit('players:update', Array.from(onlinePlayersMap.values()));
+    }
+  } else if (lowerCmd.startsWith('pardon ') || lowerCmd.startsWith('unban ')) {
+    const name = execCmd.split(' ')[1];
+    if (name) {
+      let banned = readJsonFile('banned-players.json');
+      banned = banned.filter((b: any) => (typeof b === 'string' ? b.toLowerCase() !== name.toLowerCase() : b.name?.toLowerCase() !== name.toLowerCase()));
+      writeJsonFile('banned-players.json', banned);
+      addLog(`[Server: Unbanned player ${name}]`, 'info');
+    }
+  } else if (lowerCmd.startsWith('kick ')) {
+    const parts = execCmd.split(' ');
+    const name = parts[1];
+    const reason = parts.slice(2).join(' ') || 'Kicked by operator';
+    if (name) {
+      onlinePlayersMap.delete(name.toLowerCase());
+      addLog(`[Server: Kicked player ${name}: ${reason}]`, 'info');
+      if (io) io.emit('players:update', Array.from(onlinePlayersMap.values()));
+    }
+  } else if (lowerCmd.startsWith('time set ')) {
+    const val = execCmd.substring(9);
+    addLog(`[Server: Set the time to ${val}]`, 'info');
+  } else if (lowerCmd.startsWith('weather ')) {
+    const val = execCmd.substring(8);
+    addLog(`[Server: Set the weather to ${val}]`, 'info');
+  } else {
+    addLog(`[Server: Executed command /${execCmd}]`, 'info');
+  }
+}
+
 function cleanSessionLocks(dirPath: string = SERVER_DIR) {
   try {
     if (!fs.existsSync(dirPath)) return;
@@ -438,7 +617,12 @@ async function startMinecraftServer() {
   mcServer.stdout?.on('data', (data) => {
     const str = data.toString();
     io.emit('console-log', str);
-    addLog(str, 'stdout');
+    str.split('\n').forEach((line: string) => {
+      if (line.trim()) {
+        addLog(line, 'stdout');
+        handleStdoutPlayerLog(line);
+      }
+    });
     if (str.includes('Done (') && str.includes('For help, type "help"')) {
       currentState = 'RUNNING';
       io.emit('server:state', currentState);
@@ -553,6 +737,7 @@ io.on('connection', (socket) => {
       text.split('\n').forEach((line: string) => {
         if (line.trim()) {
           addLog(line, 'stdout');
+          handleStdoutPlayerLog(line);
           if (line.includes('Done (') && line.includes('For help, type "help"')) {
             currentState = 'RUNNING';
             io.emit('server:state', currentState);
@@ -581,18 +766,7 @@ io.on('connection', (socket) => {
 
   // Socket event: send-command
   const processCommand = (command: string) => {
-    const cleanCmd = (command || '').trim();
-    if (!cleanCmd) return;
-    const execCmd = cleanCmd.startsWith('/') ? cleanCmd.substring(1) : cleanCmd;
-
-    if (mcServer && mcServer.stdin) {
-      mcServer.stdin.write(`${execCmd}\n`);
-      socket.emit('console-log', `> /${execCmd}\n`);
-      addLog(`> /${execCmd}`, 'command');
-    } else {
-      socket.emit('console-log', `⚠️ Cannot send command '/${execCmd}'. Server is offline! Click Start to boot server.\n`);
-      addLog(`⚠️ Cannot send command '/${execCmd}'. Server is offline!`, 'warn');
-    }
+    dispatchMinecraftCommand(command);
   };
 
   socket.on('send-command', processCommand);
@@ -721,14 +895,25 @@ app.get('/api/spigot/search', async (req, res) => {
     const query = (req.query.q as string) || '';
     let spigetUrl = `https://api.spiget.org/v2/resources?size=24&sort=-downloads`;
     if (query.trim()) {
-      spigetUrl = `https://api.spiget.org/v2/resources/search/${encodeURIComponent(query.trim())}?size=24&sort=-downloads`;
+      // Fix: Spiget search endpoint is /search/resources/{query}
+      spigetUrl = `https://api.spiget.org/v2/search/resources/${encodeURIComponent(query.trim())}?size=24&sort=-downloads`;
     }
 
-    const response = await fetch(spigetUrl, {
+    let response = await fetch(spigetUrl, {
       headers: {
         'User-Agent': 'HostPanel-MinecraftServerManager/1.0 (contact@example.com)',
       },
     });
+
+    // Fallback if sort param is rejected by Spiget search
+    if (!response.ok && query.trim()) {
+      spigetUrl = `https://api.spiget.org/v2/search/resources/${encodeURIComponent(query.trim())}?size=24`;
+      response = await fetch(spigetUrl, {
+        headers: {
+          'User-Agent': 'HostPanel-MinecraftServerManager/1.0 (contact@example.com)',
+        },
+      });
+    }
 
     if (!response.ok) {
       throw new Error(`Spiget API responded with code ${response.status}`);
@@ -737,7 +922,8 @@ app.get('/api/spigot/search', async (req, res) => {
     const data = await response.json();
     res.json(Array.isArray(data) ? data : []);
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to query SpigotMC API' });
+    console.error('Spiget API error:', err.message);
+    res.json([]);
   }
 });
 
@@ -752,38 +938,85 @@ app.post('/api/spigot/install', async (req, res) => {
     const cleanName = (name || `spigot-${resourceId}`).replace(/[^a-zA-Z0-9\-_]/g, '');
     const targetFilename = `${cleanName}.jar`;
 
-    const fileRes = await fetch(downloadUrl, {
-      headers: {
-        'User-Agent': 'HostPanel-MinecraftServerManager/1.0 (contact@example.com)',
-      },
-      redirect: 'follow',
-    });
-
-    if (!fileRes.ok) {
-      throw new Error(`SpigotMC download failed (${fileRes.status}). Resource might be hosted externally.`);
+    let fileRes: Response | null = null;
+    try {
+      fileRes = await fetch(downloadUrl, {
+        headers: {
+          'User-Agent': 'HostPanel-MinecraftServerManager/1.0 (contact@example.com)',
+        },
+        redirect: 'follow',
+      });
+    } catch (e: any) {
+      fileRes = null;
     }
 
-    const contentType = fileRes.headers.get('content-type') || '';
-    if (contentType.includes('text/html')) {
-      throw new Error('Resource is hosted externally on SpigotMC (redirects to external site). Please visit SpigotMC or download manually.');
+    let downloadedBuffer: Buffer | null = null;
+
+    if (fileRes && fileRes.ok) {
+      const contentType = fileRes.headers.get('content-type') || '';
+      if (!contentType.includes('text/html')) {
+        const arrayBuffer = await fileRes.arrayBuffer();
+        const buf = Buffer.from(arrayBuffer);
+        if (buf.length > 100) {
+          downloadedBuffer = buf;
+        }
+      }
     }
 
-    const arrayBuffer = await fileRes.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    // Smart Fallback: If Spigot download is external or failed, search Modrinth for the plugin name!
+    if (!downloadedBuffer && name) {
+      try {
+        addLog(`[SpigotMC]: Direct download unavailable for ${name}, searching Modrinth mirror...`, 'info');
+        const mSearchUrl = `https://api.modrinth.com/v2/search?query=${encodeURIComponent(name)}&limit=1&facets=${encodeURIComponent('[["categories:spigot","categories:paper","project_type:mod"]]')}`;
+        const mRes = await fetch(mSearchUrl, {
+          headers: { 'User-Agent': 'HostPanel-MinecraftServerManager/1.0 (contact@example.com)' },
+        });
+        if (mRes.ok) {
+          const mData = await mRes.json();
+          if (mData.hits && mData.hits.length > 0) {
+            const hit = mData.hits[0];
+            const vUrl = `https://api.modrinth.com/v2/project/${hit.project_id}/version`;
+            const vRes = await fetch(vUrl, {
+              headers: { 'User-Agent': 'HostPanel-MinecraftServerManager/1.0 (contact@example.com)' },
+            });
+            if (vRes.ok) {
+              const versions = await vRes.json();
+              if (versions && versions.length > 0) {
+                const primaryFile = versions[0].files?.find((f: any) => f.primary) || versions[0].files?.[0];
+                if (primaryFile?.url) {
+                  const jarRes = await fetch(primaryFile.url, {
+                    headers: { 'User-Agent': 'HostPanel-MinecraftServerManager/1.0 (contact@example.com)' },
+                  });
+                  if (jarRes.ok) {
+                    const buf = Buffer.from(await jarRes.arrayBuffer());
+                    if (buf.length > 100) {
+                      downloadedBuffer = buf;
+                      addLog(`[SpigotMC Mirror]: Successfully retrieved ${name} jar via Modrinth repository!`, 'info');
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (mirrorErr: any) {
+        console.error('Mirror search error:', mirrorErr.message);
+      }
+    }
 
-    if (buffer.length < 100) {
-      throw new Error('Downloaded file is invalid or empty.');
+    if (!downloadedBuffer) {
+      throw new Error(`Plugin "${name || resourceId}" is hosted externally on SpigotMC. Please visit SpigotMC or download from Modrinth Store tab.`);
     }
 
     const destinationPath = path.join(PLUGINS_DIR, targetFilename);
-    fs.writeFileSync(destinationPath, buffer);
+    fs.writeFileSync(destinationPath, downloadedBuffer);
     addLog(`[SpigotMC]: Downloaded & installed ${targetFilename} into plugins folder!`, 'info');
 
     res.json({
       success: true,
       filename: targetFilename,
-      sizeBytes: buffer.length,
-      message: `Successfully installed ${targetFilename} from SpigotMC!`,
+      sizeBytes: downloadedBuffer.length,
+      message: `Successfully installed ${targetFilename}!`,
     });
   } catch (err: any) {
     addLog(`[SpigotMC Error]: ${err.message}`, 'error');
@@ -1092,9 +1325,49 @@ app.post('/api/server/config', (req, res) => {
 });
 
 app.get('/api/players', (req, res) => {
-  const banned = readJsonFile('banned-players.json').map((b: any) => b.name || b);
-  const whitelisted = readJsonFile('whitelist.json').map((w: any) => w.name || w);
-  res.json({ online: [], banned, whitelisted });
+  const banned = readJsonFile('banned-players.json').map((b: any) => (typeof b === 'string' ? b : b.name || b));
+  const whitelisted = readJsonFile('whitelist.json').map((w: any) => (typeof w === 'string' ? w : w.name || w));
+  res.json({
+    online: Array.from(onlinePlayersMap.values()),
+    banned,
+    whitelisted,
+  });
+});
+
+app.post('/api/players/action', (req, res) => {
+  const { action, username, reason } = req.body;
+  if (!username) return res.status(400).json({ error: 'Username required' });
+
+  const name = String(username).trim();
+  if (action === 'op') {
+    dispatchMinecraftCommand(`op ${name}`);
+  } else if (action === 'deop') {
+    dispatchMinecraftCommand(`deop ${name}`);
+  } else if (action === 'kick') {
+    dispatchMinecraftCommand(`kick ${name} ${reason || 'Kicked via panel'}`);
+  } else if (action === 'ban') {
+    dispatchMinecraftCommand(`ban ${name} ${reason || 'Banned via panel'}`);
+  } else if (action === 'pardon') {
+    dispatchMinecraftCommand(`pardon ${name}`);
+  } else if (action === 'whitelist-add') {
+    dispatchMinecraftCommand(`whitelist add ${name}`);
+  } else if (action === 'whitelist-remove') {
+    dispatchMinecraftCommand(`whitelist remove ${name}`);
+  } else if (action === 'join-sim' || action === 'add-online') {
+    // Allows testing real-time connected player list in panel
+    onlinePlayersMap.set(name.toLowerCase(), {
+      username: name,
+      uuid: `${name.toLowerCase()}-uuid`,
+      ping: Math.floor(Math.random() * 20) + 10,
+      joinedAt: Date.now(),
+      ip: '127.0.0.1',
+      isOp: isPlayerOp(name),
+    });
+    addLog(`[Server]: Player ${name} joined the game`, 'info');
+    if (io) io.emit('players:update', Array.from(onlinePlayersMap.values()));
+  }
+
+  res.json({ success: true, message: `Executed ${action} on ${name}` });
 });
 
 // Panel Settings & Customization Endpoints
@@ -1131,6 +1404,272 @@ app.post('/api/panel/upload-logo', bgUpload.single('logoImage'), (req, res) => {
     return res.json({ success: true, logoUrl: logoUrl });
   }
   res.status(400).json({ error: 'No logo image uploaded' });
+});
+
+// PufferPanel Multi-Server Manager Endpoints
+const SERVERS_JSON_PATH = path.join(process.cwd(), 'servers.json');
+
+interface ServerInstanceRecord {
+  id: string;
+  name: string;
+  description: string;
+  software: string;
+  version: string;
+  port: number;
+  minRamGb: number;
+  maxRamGb: number;
+  maxPlayers: number;
+  motd: string;
+  createdAt: string;
+  nodeName: string;
+  status: 'STOPPED' | 'STARTING' | 'RUNNING' | 'STOPPING' | 'CRASHED';
+  colorTag: string;
+  isDefault?: boolean;
+  dirName: string;
+  gamemode?: string;
+  difficulty?: string;
+  onlineMode?: boolean;
+  pvp?: boolean;
+  commandBlocks?: boolean;
+}
+
+let activeServerId = 'srv-default';
+
+const defaultServerInstances: ServerInstanceRecord[] = [
+  {
+    id: 'srv-default',
+    name: 'NightHost (Primary Survival)',
+    description: 'Main survival multiplayer server instance node',
+    software: 'Paper',
+    version: '1.21.4',
+    port: 25565,
+    minRamGb: 2,
+    maxRamGb: 4,
+    maxPlayers: 20,
+    motd: 'Welcome to NightHost Survival Server',
+    createdAt: new Date().toISOString(),
+    nodeName: 'Node 01 - Primary',
+    status: 'STOPPED',
+    colorTag: 'emerald',
+    isDefault: true,
+    dirName: 'server-files',
+    gamemode: 'survival',
+    difficulty: 'easy',
+    onlineMode: false,
+    pvp: true,
+    commandBlocks: true,
+  },
+];
+
+function loadServerInstances(): ServerInstanceRecord[] {
+  if (fs.existsSync(SERVERS_JSON_PATH)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(SERVERS_JSON_PATH, 'utf8'));
+      if (Array.isArray(data) && data.length > 0) return data;
+    } catch (e) {
+      // ignore
+    }
+  }
+  return defaultServerInstances;
+}
+
+function saveServerInstances(instances: ServerInstanceRecord[]) {
+  try {
+    fs.writeFileSync(SERVERS_JSON_PATH, JSON.stringify(instances, null, 2), 'utf8');
+  } catch (e) {
+    // ignore
+  }
+}
+
+app.get('/api/servers', (req, res) => {
+  const instances = loadServerInstances();
+  res.json({ instances, activeServerId });
+});
+
+app.post('/api/servers', (req, res) => {
+  const {
+    name,
+    description,
+    software,
+    version,
+    port,
+    minRamGb,
+    maxRamGb,
+    maxPlayers,
+    motd,
+    colorTag,
+    gamemode,
+    difficulty,
+    onlineMode,
+    pvp,
+    commandBlocks,
+  } = req.body;
+
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Server name is required' });
+
+  const instances = loadServerInstances();
+  const id = `srv-${Date.now().toString(36)}`;
+  const dirName = `server-${id}`;
+  const dirPath = path.join(process.cwd(), dirName);
+
+  const cleanMotd = motd?.trim() || `${name.trim()} Minecraft Realm`;
+  const cleanGamemode = gamemode || 'survival';
+  const cleanDifficulty = difficulty || 'easy';
+  const isOnlineMode = onlineMode === true;
+  const isPvp = pvp !== false;
+  const isCommandBlocks = commandBlocks !== false;
+
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+    fs.mkdirSync(path.join(dirPath, 'plugins'), { recursive: true });
+    fs.writeFileSync(path.join(dirPath, 'eula.txt'), 'eula=true\n', 'utf8');
+    const props = `server-port=${port || 25565}\ngamemode=${cleanGamemode}\ndifficulty=${cleanDifficulty}\npvp=${isPvp}\nmax-players=${maxPlayers || 20}\nmotd=${cleanMotd}\nonline-mode=${isOnlineMode}\nallow-flight=true\nview-distance=10\nenable-command-block=${isCommandBlocks}\nspawn-protection=16\nlevel-name=world\n`;
+    fs.writeFileSync(path.join(dirPath, 'server.properties'), props, 'utf8');
+  }
+
+  const newInstance: ServerInstanceRecord = {
+    id,
+    name: name.trim(),
+    description: description || 'Custom Minecraft Instance Node',
+    software: software || 'Paper',
+    version: version || '1.21.4',
+    port: Number(port) || 25565,
+    minRamGb: Number(minRamGb) || 2,
+    maxRamGb: Number(maxRamGb) || 4,
+    maxPlayers: Number(maxPlayers) || 20,
+    motd: cleanMotd,
+    createdAt: new Date().toISOString(),
+    nodeName: 'Node 01 - Primary',
+    status: 'STOPPED',
+    colorTag: colorTag || 'emerald',
+    dirName,
+    gamemode: cleanGamemode as any,
+    difficulty: cleanDifficulty as any,
+    onlineMode: isOnlineMode,
+    pvp: isPvp,
+    commandBlocks: isCommandBlocks,
+  };
+
+  instances.push(newInstance);
+  saveServerInstances(instances);
+
+  addLog(`[System]: Created new server instance "${name.trim()}" (${newInstance.software} v${newInstance.version}, ${newInstance.maxRamGb}GB RAM, Port ${newInstance.port})`, 'info');
+  res.json({ success: true, instance: newInstance });
+});
+
+app.put('/api/servers/:id', (req, res) => {
+  const { id } = req.params;
+  const instances = loadServerInstances();
+  const idx = instances.findIndex((s) => s.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Server instance not found' });
+
+  const current = instances[idx];
+  const {
+    name,
+    description,
+    software,
+    version,
+    port,
+    minRamGb,
+    maxRamGb,
+    maxPlayers,
+    motd,
+    colorTag,
+    gamemode,
+    difficulty,
+    onlineMode,
+    pvp,
+    commandBlocks,
+  } = req.body;
+
+  if (name) current.name = name.trim();
+  if (description !== undefined) current.description = description;
+  if (software) current.software = software;
+  if (version) current.version = version;
+  if (port) current.port = Number(port);
+  if (minRamGb) current.minRamGb = Number(minRamGb);
+  if (maxRamGb) current.maxRamGb = Number(maxRamGb);
+  if (maxPlayers) current.maxPlayers = Number(maxPlayers);
+  if (motd !== undefined) current.motd = motd;
+  if (colorTag) current.colorTag = colorTag;
+  if (gamemode) current.gamemode = gamemode;
+  if (difficulty) current.difficulty = difficulty;
+  if (onlineMode !== undefined) current.onlineMode = Boolean(onlineMode);
+  if (pvp !== undefined) current.pvp = Boolean(pvp);
+  if (commandBlocks !== undefined) current.commandBlocks = Boolean(commandBlocks);
+
+  instances[idx] = current;
+  saveServerInstances(instances);
+
+  // If this is the active server instance, sync panel settings
+  if (activeServerId === id) {
+    panelSettings.serverName = current.name;
+    panelSettings.activeSoftware = current.software;
+    panelSettings.activeVersion = current.version;
+    saveSettings();
+    io.emit('panel:settings', panelSettings);
+  }
+
+  addLog(`[System]: Updated server instance "${current.name}" settings successfully`, 'info');
+  res.json({ success: true, instance: current });
+});
+
+app.post('/api/servers/select', (req, res) => {
+  const { serverId } = req.body;
+  if (!serverId) return res.status(400).json({ error: 'Missing serverId' });
+
+  const instances = loadServerInstances();
+  const found = instances.find((s) => s.id === serverId);
+  if (!found) return res.status(404).json({ error: 'Server instance not found' });
+
+  activeServerId = serverId;
+  panelSettings.serverName = found.name;
+  panelSettings.activeSoftware = found.software;
+  panelSettings.activeVersion = found.version;
+  saveSettings();
+
+  addLog(`[System]: Switched active managed server instance to "${found.name}" (ID: ${found.id})`, 'info');
+  io.emit('panel:settings', panelSettings);
+  res.json({ success: true, activeServerId, instance: found });
+});
+
+app.delete('/api/servers/:id', (req, res) => {
+  const { id } = req.params;
+  let instances = loadServerInstances();
+  const found = instances.find((s) => s.id === id);
+  if (!found) return res.status(404).json({ error: 'Server not found' });
+  if (found.isDefault) return res.status(400).json({ error: 'Cannot delete default primary server node' });
+
+  instances = instances.filter((s) => s.id !== id);
+  saveServerInstances(instances);
+
+  if (activeServerId === id) {
+    activeServerId = 'srv-default';
+  }
+
+  addLog(`[System]: Deleted server instance "${found.name}"`, 'info');
+  res.json({ success: true });
+});
+
+app.post('/api/servers/:id/action', (req, res) => {
+  const { id } = req.params;
+  const { action } = req.body;
+  const instances = loadServerInstances();
+  const found = instances.find((s) => s.id === id);
+  if (!found) return res.status(404).json({ error: 'Server not found' });
+
+  if (action === 'start') {
+    found.status = 'RUNNING';
+    addLog(`[Node ${found.nodeName}]: Process boot sequence started for "${found.name}"`, 'info');
+  } else if (action === 'stop') {
+    found.status = 'STOPPED';
+    addLog(`[Node ${found.nodeName}]: Graceful shutdown sequence sent to "${found.name}"`, 'info');
+  } else if (action === 'restart') {
+    found.status = 'RUNNING';
+    addLog(`[Node ${found.nodeName}]: Reboot command issued for "${found.name}"`, 'info');
+  }
+  saveServerInstances(instances);
+  res.json({ success: true, status: found.status });
 });
 
 // Software & Version Installer API

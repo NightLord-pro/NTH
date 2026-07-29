@@ -133,3 +133,27 @@ export interface ScheduledTask {
   lastRun?: string;
 }
 
+export interface ServerInstance {
+  id: string;
+  name: string;
+  description: string;
+  software: string;
+  version: string;
+  port: number;
+  minRamGb: number;
+  maxRamGb: number;
+  maxPlayers: number;
+  motd: string;
+  createdAt: string;
+  nodeName: string;
+  status: ServerState;
+  colorTag: 'emerald' | 'cyan' | 'purple' | 'amber' | 'rose' | 'indigo';
+  isDefault?: boolean;
+  dirName?: string;
+  gamemode?: 'survival' | 'creative' | 'adventure' | 'spectator';
+  difficulty?: 'peaceful' | 'easy' | 'normal' | 'hard';
+  onlineMode?: boolean;
+  pvp?: boolean;
+  commandBlocks?: boolean;
+}
+

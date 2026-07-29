@@ -10,6 +10,8 @@ export const PlayerManager: React.FC = () => {
   const [reasonInput, setReasonInput] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
 
+  const [addOnlineName, setAddOnlineName] = useState('');
+
   const fetchPlayerData = async () => {
     try {
       const res = await fetch('/api/players');
@@ -24,7 +26,7 @@ export const PlayerManager: React.FC = () => {
 
   useEffect(() => {
     fetchPlayerData();
-    const interval = setInterval(fetchPlayerData, 4000);
+    const interval = setInterval(fetchPlayerData, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -45,6 +47,13 @@ export const PlayerManager: React.FC = () => {
     } finally {
       setTimeout(() => setStatusMsg(''), 3000);
     }
+  };
+
+  const handleAddLivePlayer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addOnlineName.trim()) return;
+    handlePlayerAction('add-online', addOnlineName.trim());
+    setAddOnlineName('');
   };
 
   return (
@@ -68,13 +77,33 @@ export const PlayerManager: React.FC = () => {
             </div>
           </div>
 
-          <button
-            onClick={fetchPlayerData}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Refresh</span>
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <form onSubmit={handleAddLivePlayer} className="flex items-center gap-1.5">
+              <input
+                type="text"
+                placeholder="Connect player name..."
+                value={addOnlineName}
+                onChange={(e) => setAddOnlineName(e.target.value)}
+                className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 w-36 sm:w-48 font-mono"
+              />
+              <button
+                type="submit"
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer transition-all"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Connect</span>
+              </button>
+            </form>
+
+            <button
+              onClick={fetchPlayerData}
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Refresh player list"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+          </div>
         </div>
 
         {/* Players Table */}

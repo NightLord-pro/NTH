@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ServerState, ServerMetrics, PanelSettings } from '../types';
+import { ServerState, ServerMetrics, PanelSettings, ServerInstance } from '../types';
 import { getThemeStyles, getSidebarBgClass } from '../utils/theme';
 import {
   Play,
@@ -21,6 +21,9 @@ import {
   Sparkles,
   Menu,
   X,
+  ChevronDown,
+  Plus,
+  Server,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -30,6 +33,9 @@ interface NavbarProps {
   metrics: ServerMetrics | null;
   onServerAction: (action: 'start' | 'stop' | 'restart' | 'kill') => void;
   settings: PanelSettings;
+  serverInstances?: ServerInstance[];
+  activeServerId?: string;
+  onSelectServer?: (id: string) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -39,12 +45,24 @@ export const Navbar: React.FC<NavbarProps> = ({
   metrics,
   onServerAction,
   settings,
+  serverInstances = [],
+  activeServerId = 'srv-default',
+  onSelectServer,
 }) => {
   const [copied, setCopied] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
 
   const theme = getThemeStyles(settings.themeColor);
   const hudTransparent = settings.hudTransparent ?? true;
+
+  const currentInstance = serverInstances.find((s) => s.id === activeServerId) || {
+    id: activeServerId,
+    name: settings.serverName || 'NightHost (NTH)',
+    software: settings.activeSoftware || 'Paper',
+    version: settings.activeVersion || '1.21.4',
+    port: 25565,
+  };
 
   const getBadgeColor = (state: ServerState) => {
     switch (state) {
@@ -63,6 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const navItems = [
     { id: 'console', label: 'Console', icon: Terminal },
+    { id: 'servers', label: 'Server Hub (Nodes)', icon: Server },
     { id: 'versions', label: 'Versions Manager', icon: Layers },
     { id: 'worlds', label: 'World Manager', icon: Globe },
     { id: 'players', label: 'Player Manager', icon: Users },
@@ -73,6 +92,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'config', label: 'Server Properties', icon: Settings },
     { id: 'settings', label: 'Panel Settings', icon: Sliders },
   ];
+
 
   const handleCopyAddress = () => {
     if (settings.serverAddress) {
@@ -130,6 +150,78 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </div>
           </div>
+        </div>
+
+        {/* Multi-Server Instance Switcher (PufferPanel Style) */}
+        <div className="relative">
+          <button
+            onClick={() => setSwitcherOpen(!switcherOpen)}
+            className="w-full bg-slate-950/90 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 p-2.5 rounded-xl text-left flex items-center justify-between gap-2 transition-all cursor-pointer group shadow-inner"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className={`w-7 h-7 rounded-lg ${theme.bgActive} border ${theme.borderActive} flex items-center justify-center shrink-0`}>
+                <Server className={`w-3.5 h-3.5 ${theme.textPrimary}`} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="text-[10px] text-slate-500 font-mono uppercase block leading-none">
+                  Active Server Node
+                </span>
+                <span className="text-xs font-bold text-slate-200 truncate block mt-0.5 group-hover:text-white">
+                  {currentInstance.name}
+                </span>
+              </div>
+            </div>
+            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${switcherOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {/* Switcher Dropdown List */}
+          {switcherOpen && (
+            <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900 border border-slate-800 rounded-xl p-2 shadow-2xl space-y-1 backdrop-blur-xl animate-fade-in">
+              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider px-2 py-1 font-mono flex items-center justify-between">
+                <span>Select Instance</span>
+                <span className="text-emerald-400">{serverInstances.length} Available</span>
+              </div>
+
+              <div className="max-h-48 overflow-y-auto space-y-1 scrollbar-thin scrollbar-thumb-slate-800">
+                {serverInstances.map((srv) => {
+                  const isCur = srv.id === activeServerId;
+                  return (
+                    <button
+                      key={srv.id}
+                      onClick={() => {
+                        if (onSelectServer) onSelectServer(srv.id);
+                        setSwitcherOpen(false);
+                      }}
+                      className={`w-full p-2 rounded-lg text-left text-xs font-mono flex items-center justify-between transition-all cursor-pointer ${
+                        isCur
+                          ? `${theme.bgActive} ${theme.textPrimary} font-bold border ${theme.borderActive}`
+                          : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <span className="block truncate font-sans font-semibold">{srv.name}</span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {srv.software} • :{srv.port}
+                        </span>
+                      </div>
+                      {isCur && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-1" />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                onClick={() => {
+                  setActiveTab('servers');
+                  setSwitcherOpen(false);
+                }}
+                className={`w-full py-2 px-2.5 mt-1 rounded-lg ${theme.bgSolid} ${theme.bgSolidHover} text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Server Instances Manager</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Server Address Pill & Status Badge */}

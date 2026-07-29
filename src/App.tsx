@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { ServerState, ServerMetrics, ConsoleLog, PanelSettings } from './types';
+import { ServerState, ServerMetrics, ConsoleLog, PanelSettings, ServerInstance } from './types';
 import { Navbar } from './components/Navbar';
 import { ConsoleView } from './components/ConsoleView';
 import { MetricsView } from './components/MetricsView';
@@ -12,6 +12,7 @@ import { VersionsManager } from './components/VersionsManager';
 import { PanelSettingsView } from './components/PanelSettingsView';
 import { WorldManager } from './components/WorldManager';
 import { BackupManager } from './components/BackupManager';
+import { ServerInstancesManager } from './components/ServerInstancesManager';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('console');
@@ -19,6 +20,10 @@ export default function App() {
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null);
   const [logs, setLogs] = useState<ConsoleLog[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
+
+  // Multi-server instances state
+  const [serverInstances, setServerInstances] = useState<ServerInstance[]>([]);
+  const [activeServerId, setActiveServerId] = useState('srv-default');
 
   // Panel settings state
   const [panelSettings, setPanelSettings] = useState<PanelSettings>({
@@ -31,6 +36,37 @@ export default function App() {
     activeSoftware: 'Paper',
     activeVersion: '1.21.4',
   });
+
+  const fetchServerInstances = async () => {
+    try {
+      const res = await fetch('/api/servers');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.instances) setServerInstances(data.instances);
+        if (data.activeServerId) setActiveServerId(data.activeServerId);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSelectServer = async (id: string) => {
+    setActiveServerId(id);
+    try {
+      const res = await fetch('/api/servers/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverId: id }),
+      });
+      if (res.ok) {
+        await fetchServerInstances();
+        await fetchSettings();
+      }
+    } catch (e) {
+      console.error('Failed to select server instance:', e);
+    }
+  };
+
 
   // Status flags from backend
   const [javaAvailable, setJavaAvailable] = useState(false);
@@ -73,6 +109,7 @@ export default function App() {
   useEffect(() => {
     fetchStatus();
     fetchSettings();
+    fetchServerInstances();
 
     // Socket.io initialization
     const s = io('/', {
@@ -221,6 +258,9 @@ export default function App() {
           metrics={metrics}
           onServerAction={handleServerAction}
           settings={panelSettings}
+          serverInstances={serverInstances}
+          activeServerId={activeServerId}
+          onSelectServer={handleSelectServer}
         />
 
         {/* Main Content View Container */}
@@ -232,6 +272,15 @@ export default function App() {
               onClearLogs={handleClearLogs}
               serverState={serverState}
               settings={panelSettings}
+            />
+          )}
+
+          {activeTab === 'servers' && (
+            <ServerInstancesManager
+              settings={panelSettings}
+              activeServerId={activeServerId}
+              onSelectServer={handleSelectServer}
+              onOpenConsole={() => setActiveTab('console')}
             />
           )}
 
