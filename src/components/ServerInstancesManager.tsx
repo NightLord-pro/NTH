@@ -35,6 +35,7 @@ interface ServerInstancesManagerProps {
   activeServerId: string;
   onSelectServer: (serverId: string) => void;
   onOpenConsole: () => void;
+  currentUser?: any;
 }
 
 export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
@@ -42,7 +43,10 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
   activeServerId,
   onSelectServer,
   onOpenConsole,
+  currentUser,
 }) => {
+  const isOwnerOrAdmin = !currentUser || currentUser.role === 'Administrator' || currentUser.role === 'Owner';
+  const canCreateServer = isOwnerOrAdmin || currentUser?.permissions?.canCreateServers === true;
   const [servers, setServers] = useState<ServerInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -58,6 +62,7 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
   const [formSoftware, setFormSoftware] = useState('Paper');
   const [formVersion, setFormVersion] = useState('1.21.4');
   const [formPort, setFormPort] = useState(25565);
+  const [formServerAddress, setFormServerAddress] = useState('play.nighthost.in:25565');
   const [formMinRamGb, setFormMinRamGb] = useState(2);
   const [formMaxRamGb, setFormMaxRamGb] = useState(4);
   const [formMaxPlayers, setFormMaxPlayers] = useState(20);
@@ -67,9 +72,23 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
   const [formPvp, setFormPvp] = useState(true);
   const [formCommandBlocks, setFormCommandBlocks] = useState(true);
   const [formColorTag, setFormColorTag] = useState<'emerald' | 'cyan' | 'purple' | 'amber' | 'rose' | 'indigo'>('emerald');
+  const [formAssignedUser, setFormAssignedUser] = useState('admin');
+  const [systemUsers, setSystemUsers] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const theme = getThemeStyles(settings.themeColor);
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch('/api/users');
+      if (res.ok) {
+        const data = await res.json();
+        setSystemUsers(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch users:', e);
+    }
+  };
 
   const fetchServers = async () => {
     try {
@@ -90,18 +109,26 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
 
   useEffect(() => {
     fetchServers();
+    fetchUsers();
     const interval = setInterval(fetchServers, 4000);
     return () => clearInterval(interval);
   }, []);
 
   const openCreateModal = () => {
+    if (!canCreateServer) {
+      setActionMsg('🚫 Server Creation Restricted: Only Panel Owner / Administrator can create new server instances.');
+      setTimeout(() => setActionMsg(''), 5000);
+      return;
+    }
     setEditingServerId(null);
     setFormName('');
     setFormMotd('§aWelcome to §bNightHost SMP! §e[1.21.4]');
     setFormDesc('Custom survival server instance node');
     setFormSoftware('Paper');
     setFormVersion('1.21.4');
-    setFormPort(25565 + servers.length);
+    const defaultPort = 25565 + servers.length;
+    setFormPort(defaultPort);
+    setFormServerAddress(`play${servers.length > 0 ? (servers.length + 1) : ''}.nighthost.in:${defaultPort}`);
     setFormMinRamGb(2);
     setFormMaxRamGb(4);
     setFormMaxPlayers(20);
@@ -111,6 +138,7 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
     setFormPvp(true);
     setFormCommandBlocks(true);
     setFormColorTag('emerald');
+    setFormAssignedUser('admin');
     setShowModal(true);
   };
 
@@ -122,6 +150,8 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
     setFormSoftware(srv.software || 'Paper');
     setFormVersion(srv.version || '1.21.4');
     setFormPort(srv.port || 25565);
+    const fallbackSubdomain = srv.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'play';
+    setFormServerAddress(srv.serverAddress || `${fallbackSubdomain}.nighthost.in:${srv.port || 25565}`);
     setFormMinRamGb(srv.minRamGb || 2);
     setFormMaxRamGb(srv.maxRamGb || 4);
     setFormMaxPlayers(srv.maxPlayers || 20);
@@ -131,6 +161,7 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
     setFormPvp(srv.pvp ?? true);
     setFormCommandBlocks(srv.commandBlocks ?? true);
     setFormColorTag(srv.colorTag || 'emerald');
+    setFormAssignedUser(srv.assignedUser || 'admin');
     setShowModal(true);
   };
 
@@ -186,6 +217,23 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
     }
   };
 
+  const handleAssignServerToUser = async (serverId: string, targetUsername: string) => {
+    try {
+      const res = await fetch(`/api/servers/${serverId}/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUsername }),
+      });
+      if (res.ok) {
+        setActionMsg(`Allocated server to @${targetUsername}!`);
+        setTimeout(() => setActionMsg(''), 3000);
+        fetchServers();
+      }
+    } catch (err) {
+      console.error('Failed to assign server:', err);
+    }
+  };
+
   const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) return;
@@ -207,6 +255,8 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
       onlineMode: formOnlineMode,
       pvp: formPvp,
       commandBlocks: formCommandBlocks,
+      assignedUser: formAssignedUser,
+      serverAddress: formServerAddress.trim(),
     };
 
     try {
@@ -363,10 +413,11 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={openCreateModal}
-            className={`px-4 py-2.5 ${theme.bgSolid} ${theme.bgSolidHover} text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition-all cursor-pointer active:scale-95 border ${theme.borderActive}`}
+            className={`px-4 py-2.5 ${canCreateServer ? `${theme.bgSolid} ${theme.bgSolidHover} text-white` : 'bg-slate-800 text-slate-400 opacity-80 cursor-not-allowed'} font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition-all active:scale-95 border ${canCreateServer ? theme.borderActive : 'border-slate-700'}`}
+            title={canCreateServer ? 'Create new Minecraft server instance' : 'Only Panel Owner / Administrator can create new server instances'}
           >
-            <Plus className="w-4 h-4" />
-            <span>Create New Server</span>
+            {canCreateServer ? <Plus className="w-4 h-4" /> : <Shield className="w-4 h-4 text-amber-400" />}
+            <span>{canCreateServer ? 'Create New Server' : 'Owner Only: Create Server'}</span>
           </button>
 
           <button
@@ -534,10 +585,46 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
                     {srv.description || 'Minecraft server instance node'}
                   </p>
 
+                  {/* Server Address Badge */}
+                  <div className="bg-slate-950/80 border border-cyan-500/30 p-2 rounded-xl font-mono text-[11px] mb-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <Globe className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span className="text-slate-400 text-[10px]">Server IP:</span>
+                      <span className="text-cyan-300 font-bold truncate">
+                        {srv.serverAddress || `play.nighthost.in:${srv.port || 25565}`}
+                      </span>
+                    </div>
+                  </div>
+
                   {/* MOTD Preview */}
                   <div className="bg-slate-950/80 border border-slate-800/90 p-2 rounded-lg font-mono text-[11px] text-emerald-400 truncate mb-3">
                     <span className="text-slate-500 text-[9px] block uppercase">MOTD</span>
                     {srv.motd || `${srv.name} Server`}
+                  </div>
+
+                  {/* Assigned User & Allocation Control */}
+                  <div className="bg-slate-950/80 border border-purple-500/30 p-2 rounded-xl font-mono text-[11px] mb-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5 text-purple-400" />
+                      <span className="text-slate-400 text-[10px]">Owner:</span>
+                      <span className="text-purple-300 font-bold">@{srv.assignedUser || 'admin'}</span>
+                    </div>
+
+                    {canCreateServer && (
+                      <select
+                        value={srv.assignedUser || 'admin'}
+                        onChange={(e) => handleAssignServerToUser(srv.id, e.target.value)}
+                        className="bg-slate-900 text-slate-200 border border-slate-700 text-[10px] rounded px-1.5 py-0.5 focus:outline-none focus:border-purple-400 cursor-pointer"
+                        title="Re-assign server instance to a member"
+                      >
+                        <option value="admin">Assign: @admin</option>
+                        {systemUsers.map((u: any) => (
+                          <option key={u.id} value={u.username}>
+                            Assign: @{u.username}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
 
                   {/* Server Stats Grid */}
@@ -733,6 +820,30 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
                   />
                 </div>
+
+                {/* Assigned Owner / Member Selection */}
+                <div className="pt-2 border-t border-slate-800/80">
+                  <label className="text-xs font-bold text-purple-400 font-mono uppercase block mb-1">
+                    Allocate Server To Member / User Account
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={formAssignedUser}
+                      onChange={(e) => setFormAssignedUser(e.target.value)}
+                      className="w-full bg-slate-900 border border-purple-500/40 rounded-xl px-3 py-2 text-xs text-purple-200 focus:outline-none focus:border-purple-400 font-mono"
+                    >
+                      <option value="admin">@admin (Owner / Administrator Default)</option>
+                      {systemUsers.map((u: any) => (
+                        <option key={u.id} value={u.username}>
+                          @{u.username} ({u.name} - {u.role})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono block mt-1">
+                    Assigning a server to a user gives them full access to Console, Files, Plugins, Worlds, and Backups for this server.
+                  </span>
+                </div>
               </div>
 
               {/* Software & Version Selection */}
@@ -768,7 +879,7 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
                       <label className="text-xs font-bold text-slate-300 font-mono uppercase block">
                         Minecraft Target Version
                       </label>
-                      <span className="text-[10px] text-emerald-400 font-mono">1.7.10 ➔ 1.21.4+</span>
+                      <span className="text-[10px] text-emerald-400 font-mono">1.7.10 ➔ 1.21.11+</span>
                     </div>
                     <div className="space-y-2">
                       <select
@@ -777,7 +888,14 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 font-mono"
                       >
                         <optgroup label="Latest Minecraft 1.21 Series">
-                          <option value="1.21.4">1.21.4 (Latest Stable Release)</option>
+                          <option value="1.21.11">1.21.11 (Latest Release)</option>
+                          <option value="1.21.10">1.21.10</option>
+                          <option value="1.21.9">1.21.9</option>
+                          <option value="1.21.8">1.21.8</option>
+                          <option value="1.21.7">1.21.7</option>
+                          <option value="1.21.6">1.21.6</option>
+                          <option value="1.21.5">1.21.5</option>
+                          <option value="1.21.4">1.21.4 (Stable Paper)</option>
                           <option value="1.21.3">1.21.3</option>
                           <option value="1.21.2">1.21.2</option>
                           <option value="1.21.1">1.21.1</option>
@@ -906,6 +1024,24 @@ export const ServerInstancesManager: React.FC<ServerInstancesManagerProps> = ({
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono"
                       />
                     </div>
+                  </div>
+
+                  {/* Per-Server Domain / IP Address Input */}
+                  <div>
+                    <label className="text-[10px] font-bold text-cyan-400 font-mono uppercase block mb-1 flex items-center gap-1">
+                      <Globe className="w-3 h-3 text-cyan-400" />
+                      <span>Server IP / Connection Address (Default: NIGHTHOST.IN)</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. play.nighthost.in:25565 or mycustom.nighthost.in"
+                      value={formServerAddress}
+                      onChange={(e) => setFormServerAddress(e.target.value)}
+                      className="w-full bg-slate-900 border border-cyan-500/40 rounded-xl px-3 py-2 text-xs text-cyan-200 font-mono focus:border-cyan-400 focus:outline-none"
+                    />
+                    <p className="text-[10px] text-slate-500 font-mono mt-1">
+                      Each server has its own dedicated connection address. Defaults to NIGHTHOST.IN.
+                    </p>
                   </div>
                 </div>
               </div>

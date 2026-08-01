@@ -3,6 +3,9 @@ import { Settings, Save, Check, RefreshCw, FileText, Globe, Shield, Sparkles } f
 
 export const ConfigEditor: React.FC = () => {
   const [props, setProps] = useState<Record<string, string>>({});
+  const [activeServer, setActiveServer] = useState<{ id: string; name: string; port: number; serverAddress: string } | null>(null);
+  const [serverAddress, setServerAddress] = useState('play.nighthost.in:25565');
+  const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
@@ -12,6 +15,10 @@ export const ConfigEditor: React.FC = () => {
       const res = await fetch('/api/server/config');
       const data = await res.json();
       if (data.properties) setProps(data.properties);
+      if (data.activeServer) {
+        setActiveServer(data.activeServer);
+        setServerAddress(data.activeServer.serverAddress || `play.nighthost.in:${data.activeServer.port || 25565}`);
+      }
     } catch {
       // ignore
     } finally {
@@ -27,6 +34,12 @@ export const ConfigEditor: React.FC = () => {
     setProps(prev => ({ ...prev, [key]: val }));
   };
 
+  const handleCopyAddress = () => {
+    navigator.clipboard.writeText(serverAddress);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -34,11 +47,14 @@ export const ConfigEditor: React.FC = () => {
       const res = await fetch('/api/server/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ properties: props }),
+        body: JSON.stringify({
+          properties: props,
+          serverAddress: serverAddress.trim(),
+        }),
       });
       const data = await res.json();
       if (data.success) {
-        setStatusMsg('server.properties successfully saved!');
+        setStatusMsg('Server configuration & dedicated IP address successfully saved!');
       }
     } catch {
       setStatusMsg('Failed to save configuration');
@@ -74,8 +90,8 @@ export const ConfigEditor: React.FC = () => {
           <div className="flex items-center gap-3">
             <Settings className="w-6 h-6 text-emerald-400" />
             <div>
-              <h2 className="text-base font-bold text-slate-100">Visual server.properties GUI Editor</h2>
-              <p className="text-xs text-slate-400">Configure Minecraft gameplay, difficulty, network ports, and world behavior</p>
+              <h2 className="text-base font-bold text-slate-100">Visual server.properties GUI & Dedicated Address Config</h2>
+              <p className="text-xs text-slate-400">Configure Minecraft gameplay, dedicated domain addresses, difficulty, and network rules</p>
             </div>
           </div>
 
@@ -87,6 +103,45 @@ export const ConfigEditor: React.FC = () => {
             {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             <span>Save Settings</span>
           </button>
+        </div>
+
+        {/* Dedicated Server Connection Address / Domain Card */}
+        <div className="bg-slate-900/90 border border-cyan-500/30 rounded-2xl p-6 shadow-2xl space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 className="font-bold text-slate-200 text-sm flex items-center gap-2">
+              <Globe className="w-4 h-4 text-cyan-400" /> Per-Server Dedicated Connection Address / Domain
+            </h3>
+            {activeServer && (
+              <span className="text-[10px] font-mono font-bold text-cyan-300 bg-cyan-950 border border-cyan-500/30 px-2.5 py-1 rounded-lg">
+                Active Node: {activeServer.name} (Port {activeServer.port})
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-slate-300 font-mono">
+              Server Connection Address (Domain / IP:Port)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={serverAddress}
+                onChange={(e) => setServerAddress(e.target.value)}
+                className="flex-1 bg-slate-950 border border-cyan-500/40 rounded-xl px-4 py-2.5 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-400 shadow-inner"
+                placeholder="e.g. play.nighthost.in:25565 or mycustom.nighthost.in"
+              />
+              <button
+                type="button"
+                onClick={handleCopyAddress}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-cyan-600 text-slate-200 hover:text-white text-xs font-mono font-bold rounded-xl transition-all cursor-pointer shrink-0"
+              >
+                {copied ? 'Copied!' : 'Copy IP'}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 font-mono">
+              Every server instance has its own unique domain/IP address. Update this field and click <strong>Save Settings</strong> to apply changes to this server node.
+            </p>
+          </div>
         </div>
 
         {/* Gameplay & World Settings Card */}

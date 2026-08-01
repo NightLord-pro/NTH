@@ -24,6 +24,9 @@ import {
   ChevronDown,
   Plus,
   Server,
+  ShieldCheck,
+  Clock,
+  BookOpen,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -36,6 +39,8 @@ interface NavbarProps {
   serverInstances?: ServerInstance[];
   activeServerId?: string;
   onSelectServer?: (id: string) => void;
+  currentUser?: any;
+  onOpenQuickGuide?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -48,6 +53,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   serverInstances = [],
   activeServerId = 'srv-default',
   onSelectServer,
+  currentUser,
+  onOpenQuickGuide,
 }) => {
   const [copied, setCopied] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -55,6 +62,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const theme = getThemeStyles(settings.themeColor);
   const hudTransparent = settings.hudTransparent ?? true;
+
+  const isOwner = !currentUser || currentUser.role === 'Administrator' || currentUser.role === 'Owner';
+  const memberServers = isOwner 
+    ? serverInstances 
+    : serverInstances.filter(s => s.assignedUser && s.assignedUser.toLowerCase() === currentUser?.username?.toLowerCase());
+  const hasAssignedServer = isOwner || memberServers.length > 0;
 
   const currentInstance = serverInstances.find((s) => s.id === activeServerId) || {
     id: activeServerId,
@@ -80,26 +93,35 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const navItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: Activity },
+    { id: 'servers', label: 'Servers', icon: Server },
+    { id: 'nodes', label: 'Node Cluster', icon: Layers },
+    { id: 'users', label: 'User Manager', icon: Users },
     { id: 'console', label: 'Console', icon: Terminal },
-    { id: 'servers', label: 'Server Hub (Nodes)', icon: Server },
-    { id: 'versions', label: 'Versions Manager', icon: Layers },
-    { id: 'worlds', label: 'World Manager', icon: Globe },
-    { id: 'players', label: 'Player Manager', icon: Users },
-    { id: 'backups', label: 'Backup & Restore', icon: Archive },
-    { id: 'metrics', label: 'Metrics & JVM', icon: Activity },
-    { id: 'plugins', label: 'Plugins & Catalog', icon: Package },
     { id: 'files', label: 'File Explorer', icon: Folder },
-    { id: 'config', label: 'Server Properties', icon: Settings },
+    { id: 'firewall', label: 'Anti-DDoS Firewall', icon: ShieldCheck },
+    { id: 'schedules', label: 'Task Scheduler', icon: Clock },
+    { id: 'marketplace', label: 'Marketplace', icon: Package },
+    { id: 'analytics', label: 'Analytics', icon: Activity },
+    { id: 'backups', label: 'Backups', icon: Archive },
+    { id: 'worlds', label: 'Worlds', icon: Globe },
+    { id: 'players', label: 'Players', icon: Users },
+    { id: 'versions', label: 'Versions Manager', icon: Sparkles },
+    { id: 'metrics', label: 'Metrics & JVM', icon: Sliders },
+    { id: 'config', label: 'Server Config', icon: Settings },
     { id: 'settings', label: 'Panel Settings', icon: Sliders },
+    { id: 'admin', label: 'Admin Panel', icon: Settings },
   ];
 
 
+  const displayAddress = hasAssignedServer
+    ? (currentInstance.serverAddress || (settings.serverAddress && !settings.serverAddress.includes('run.app') ? settings.serverAddress : `play.nighthost.in:${currentInstance.port || 25565}`))
+    : 'No Server Allocated';
+
   const handleCopyAddress = () => {
-    if (settings.serverAddress) {
-      navigator.clipboard.writeText(settings.serverAddress);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
+    navigator.clipboard.writeText(displayAddress);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const renderLogo = () => {
@@ -225,34 +247,47 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Server Address Pill & Status Badge */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <button
-              onClick={handleCopyAddress}
-              className="flex-1 text-slate-200 hover:text-white bg-slate-950/80 hover:bg-slate-900 px-2.5 py-1.5 rounded-xl text-xs font-mono border border-slate-800 flex items-center justify-between cursor-pointer transition-all backdrop-blur-sm group"
-              title="Click to copy server address"
-            >
-              <span className="truncate text-slate-300 font-medium">{settings.serverAddress || 'localhost:25565'}</span>
-              {copied ? <Check className={`w-3.5 h-3.5 ${theme.textPrimary} shrink-0 ml-1`} /> : <Copy className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 shrink-0 ml-1" />}
-            </button>
+        {hasAssignedServer ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <button
+                onClick={handleCopyAddress}
+                className="flex-1 text-slate-200 hover:text-white bg-slate-950/80 hover:bg-slate-900 px-2.5 py-1.5 rounded-xl text-xs font-mono border border-slate-800 flex items-center justify-between cursor-pointer transition-all backdrop-blur-sm group"
+                title="Click to copy server address"
+              >
+                <span className="truncate text-slate-300 font-medium">{displayAddress}</span>
+                {copied ? <Check className={`w-3.5 h-3.5 ${theme.textPrimary} shrink-0 ml-1`} /> : <Copy className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 shrink-0 ml-1" />}
+              </button>
 
-            <div className={`px-2.5 py-1 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 shrink-0 ${getBadgeColor(serverState)}`}>
-              <span className={`w-2 h-2 rounded-full ${
-                serverState === 'RUNNING' ? 'bg-emerald-400 animate-ping' :
-                serverState === 'STARTING' || serverState === 'STOPPING' ? 'bg-amber-400' :
-                serverState === 'CRASHED' ? 'bg-rose-400' : 'bg-slate-400'
-              }`} />
-              <span>{serverState}</span>
+              <div className={`px-2.5 py-1 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 shrink-0 ${getBadgeColor(serverState)}`}>
+                <span className={`w-2 h-2 rounded-full ${
+                  serverState === 'RUNNING' ? 'bg-emerald-400 animate-ping' :
+                  serverState === 'STARTING' || serverState === 'STOPPING' ? 'bg-amber-400' :
+                  serverState === 'CRASHED' ? 'bg-rose-400' : 'bg-slate-400'
+                }`} />
+                <span>{serverState}</span>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="p-2.5 bg-slate-950/80 border border-amber-500/30 rounded-xl text-center font-mono">
+            <div className="text-xs font-bold text-amber-400">Node: None</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">No Server IP Allocated</div>
+          </div>
+        )}
 
         {/* Server Power Control Buttons */}
         <div className="space-y-2">
+          {!hasAssignedServer && (
+            <div className="text-[10px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/30 p-2 rounded-xl text-center">
+              ⚠️ No Server Allocated
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-1.5">
             <button
-              onClick={() => onServerAction('start')}
-              disabled={serverState === 'RUNNING' || serverState === 'STARTING'}
+              onClick={() => hasAssignedServer && onServerAction('start')}
+              disabled={!hasAssignedServer || serverState === 'RUNNING' || serverState === 'STARTING'}
+              title={!hasAssignedServer ? 'No server instance allocated to your account' : ''}
               className={`px-3 py-2 ${theme.bgSolid} ${theme.bgSolidHover} disabled:opacity-40 text-white font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95 cursor-pointer disabled:cursor-not-allowed border ${theme.borderActive}`}
             >
               <Play className="w-3.5 h-3.5 fill-current" />
@@ -260,8 +295,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <button
-              onClick={() => onServerAction('restart')}
-              disabled={serverState === 'STOPPED' || serverState === 'STOPPING'}
+              onClick={() => hasAssignedServer && onServerAction('restart')}
+              disabled={!hasAssignedServer || serverState === 'STOPPED' || serverState === 'STOPPING'}
+              title={!hasAssignedServer ? 'No server instance allocated to your account' : ''}
               className="px-3 py-2 bg-indigo-600/90 hover:bg-indigo-500 disabled:opacity-40 text-white font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md shadow-indigo-950/40 active:scale-95 cursor-pointer disabled:cursor-not-allowed border border-indigo-500/30"
             >
               <RotateCw className="w-3.5 h-3.5" />
@@ -271,8 +307,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <div className="grid grid-cols-3 gap-1.5">
             <button
-              onClick={() => onServerAction('stop')}
-              disabled={serverState === 'STOPPED' || serverState === 'STOPPING'}
+              onClick={() => hasAssignedServer && onServerAction('stop')}
+              disabled={!hasAssignedServer || serverState === 'STOPPED' || serverState === 'STOPPING'}
+              title={!hasAssignedServer ? 'No server instance allocated to your account' : ''}
               className="col-span-2 px-3 py-1.5 bg-amber-600/90 hover:bg-amber-500 disabled:opacity-40 text-white font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md shadow-amber-950/40 active:scale-95 cursor-pointer disabled:cursor-not-allowed border border-amber-500/30"
             >
               <Square className="w-3.5 h-3.5 fill-current" />
@@ -280,18 +317,31 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <button
-              onClick={() => onServerAction('kill')}
-              className="px-2 py-1.5 bg-rose-950/70 hover:bg-rose-900 border border-rose-800/60 text-rose-300 font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-1 shadow-md shadow-rose-950/40 active:scale-95 cursor-pointer"
-              title="Force Kill Process"
+              onClick={() => hasAssignedServer && onServerAction('kill')}
+              disabled={!hasAssignedServer}
+              title={!hasAssignedServer ? 'No server instance allocated to your account' : 'Force Kill Process'}
+              className="px-2 py-1.5 bg-rose-950/70 hover:bg-rose-900 disabled:opacity-40 disabled:cursor-not-allowed border border-rose-800/60 text-rose-300 font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-1 shadow-md shadow-rose-950/40 active:scale-95 cursor-pointer"
             >
               <Skull className="w-3.5 h-3.5" />
               <span>Kill</span>
             </button>
           </div>
 
+          {/* Quick Guide & Instructions Button */}
+          {onOpenQuickGuide && (
+            <button
+              onClick={onOpenQuickGuide}
+              className="w-full px-3 py-2 bg-slate-900 hover:bg-slate-800 text-purple-300 hover:text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 border border-purple-500/30 cursor-pointer shadow-md group"
+              title="Open Quick Panel Guide & Instructions"
+            >
+              <BookOpen className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform" />
+              <span>Quick Guide & Instructions</span>
+            </button>
+          )}
+
           {/* Discord Community Link */}
           <a
-            href="https://discord.gg/DURnWu87CZ"
+            href="https://discord.gg/udUdNKzz7P"
             target="_blank"
             rel="noopener noreferrer"
             className="w-full px-3 py-2 bg-[#5865F2]/80 hover:bg-[#5865F2] text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-[#5865F2]/20 active:scale-95 cursor-pointer border border-[#7983f5]/50 group"
@@ -313,6 +363,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
+          const isAdminOnly = ['nodes', 'users', 'admin', 'settings'].includes(item.id);
+          const isServerSpecific = ['servers', 'console', 'files', 'config', 'plugins', 'worlds', 'players', 'backups', 'metrics', 'versions', 'marketplace', 'analytics'].includes(item.id);
+          const isOwnerItem = !currentUser || currentUser.role === 'Administrator' || currentUser.role === 'Owner';
+          const isRestrictedAdmin = isAdminOnly && !isOwnerItem && !currentUser?.permissions?.canAccessAdmin;
+          const isRestrictedServer = isServerSpecific && !isOwnerItem && !hasAssignedServer;
+
           return (
             <button
               key={item.id}
@@ -330,14 +386,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <Icon className={`w-4 h-4 ${isActive ? theme.textPrimary : 'text-slate-400'}`} />
                 <span>{item.label}</span>
               </div>
-              {isActive && <div className={`w-1.5 h-1.5 rounded-full ${theme.bgSolid} shadow-sm`} />}
+              {isRestrictedAdmin ? (
+                <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[9px] font-bold rounded font-mono">
+                  Owner
+                </span>
+              ) : isRestrictedServer ? (
+                <span className="px-1.5 py-0.5 bg-purple-500/10 text-purple-300 border border-purple-500/20 text-[9px] font-bold rounded font-mono">
+                  🔒 No Server
+                </span>
+              ) : isActive ? (
+                <div className={`w-1.5 h-1.5 rounded-full ${theme.bgSolid} shadow-sm`} />
+              ) : null}
             </button>
           );
         })}
       </nav>
 
       {/* Bottom Metrics Performance Widget */}
-      {metrics && (
+      {hasAssignedServer && metrics ? (
         <div className={`${hudTransparent ? 'bg-slate-950/70 border-slate-800/80 backdrop-blur-md' : 'bg-slate-950 border-slate-800'} border rounded-2xl p-3 space-y-2 text-xs font-mono shadow-inner`}>
           <div className="flex items-center justify-between text-[10px] text-slate-400 font-sans font-bold uppercase border-b border-slate-800/60 pb-1.5">
             <span>Live Metrics</span>
@@ -370,6 +436,16 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </div>
           </div>
+        </div>
+      ) : (
+        <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3 space-y-1.5 text-xs font-mono">
+          <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase border-b border-slate-800/60 pb-1">
+            <span>Active Server Node</span>
+            <span className="text-amber-400 font-bold">None</span>
+          </div>
+          <p className="text-[11px] text-slate-500 font-sans leading-tight pt-0.5">
+            0 allocated Minecraft server instances.
+          </p>
         </div>
       )}
     </div>

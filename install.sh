@@ -1,65 +1,112 @@
 #!/bin/bash
 
 # =========================================================
-# NTH Panel - Automated Installation & Management Script
+# NTH Panel - Advanced Sung Jinwoo / Solo Leveling Edition
 # Repository: https://github.com/NightLord-pro/NTH
 # =========================================================
 
 set -e
 
-# Colors for UI
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
+# Colors for Dark Purple / Solo Leveling Theme (ANSI Escapes)
+RED='\033[38;5:196m'
+MAGENTA='\033[38;5:129m'
+PURPLE='\033[38;5:93m'
+DARK_PURPLE='\033[38;5:54m'
+VIOLET='\033[38;5:135m'
+BRIGHT_VIOLET='\033[38;5:171m'
+CYAN='\033[38;5:51m'
+WHITE='\033[1;37m'
+GRAY='\033[38;5:240m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 print_banner() {
     clear
-    echo -e "${CYAN}${BOLD}"
+    echo -e "${PURPLE}${BOLD}"
     echo "  ========================================================"
-    echo "  _   _ _____ _   _   ____                   _ _           "
-    echo " | \ | |_   _| | | | |  _ \ __ _ _ __   ___ | | |          "
-    echo " |  \| | | | | |_| | | |_) / _\` | '_ \ / _ \| | |          "
-    echo " | |\  | | | |  _| | |  _ < (_| | | | |  __/| | |          "
-    echo " |_| \_| |_| |_| |_| |_| \_\__,_|_| |_|\___||_|_|          "
-    echo "                                                           "
-    echo "               NTH HOST MANAGEMENT & INSTALLER             "
-    echo "            Main Panel Default Port: 6767                  "
-    echo "  ========================================================"
+    echo "    _   _ _____ _   _ "
+    echo "   | \ | |_   _| | | |"
+    echo "   |  \| | | | | |_| |"
+    echo "   | |\  | | | |  _| |"
+    echo "   |_| \_| |_| |_| |_|"
+    echo "                      "
+    echo -e "${VIOLET}"
+    echo "               [ SYSTEM: NTH HOST MONITOR ]               "
+    echo "            MONARCH'S DOMAIN PORT: 2424                   "
+    echo -e "${PURPLE}  ========================================================"
     echo -e "${NC}"
 }
 
+# Solo Leveling Style Loading Animation (Shadow Extraction Effect)
+loading_animation() {
+    local text="$1"
+    echo -n -e "${PURPLE}[ SYSTEM ]${WHITE} $text ${VIOLET}"
+    for i in {1..3}; do
+        echo -n "."
+        sleep 0.3
+    done
+    echo -e "${NC}"
+}
+
+# Advanced Monarch Progress Bar
+progress_bar() {
+    local duration=$1
+    local title=$2
+    local steps=20
+    local sleep_time=$(awk "BEGIN {print $duration/$steps}")
+
+    echo -e "${PURPLE}┌────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${PURPLE}│${WHITE} ${BOLD}$title${NC}"
+    echo -e "${PURPLE}├────────────────────────────────────────────────────────┤${NC}"
+    echo -n -e "${PURPLE}│${VIOLET} "
+
+    for ((i=0; i<=steps; i++)); do
+        local percent=$((i * 100 / steps))
+        local filled=$i
+        local empty=$((steps - i))
+        
+        echo -n "["
+        for ((j=0; j<filled; j++)); do echo -n "█"; done
+        for ((j=0; j<empty; j++)); do echo -n "░"; done
+        echo -n "] ${percent}% "
+        sleep "$sleep_time"
+        
+        if [ $i -lt $steps ]; then
+            echo -n -e "\r${PURPLE}│${VIOLET} "
+        fi
+    done
+    echo -e " ${PURPLE}│${NC}"
+    echo -e "${PURPLE}└────────────────────────────────────────────────────────┘${NC}"
+}
+
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    echo -e "${DARK_PURPLE}[ARISE]${WHITE} $1${NC}"
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "${VIOLET}[SHADOW EXTRACTION SUCCESS]${WHITE} $1${NC}"
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo -e "${MAGENTA}[GATE WARNING]${WHITE} $1${NC}"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[SYSTEM ERROR]${WHITE} $1${NC}"
 }
 
 check_root() {
     if [ "$EUID" -ne 0 ]; then
-        log_warning "This script is recommended to be run as root or with sudo."
+        log_warning "Shadow Monarch privileges not detected. Recommended to run as root."
     fi
 }
 
 install_panel() {
     print_banner
-    echo -e "${BOLD}--- [1] Full Panel Installation ---${NC}\n"
+    echo -e "${BOLD}${VIOLET}--- [ GATE 1: FULL PANEL DEPLOYMENT ] ---${NC}\n"
 
     check_root
-    log_info "Checking system environment and repairing package manager if needed..."
+    loading_animation "Initializing Shadow Dungeon Environment"
 
     # Auto-repair broken dpkg / apt state if apt exists
     if command -v apt-get &> /dev/null; then
@@ -87,7 +134,7 @@ install_panel() {
     fi
 
     if [ "$NEED_NODE_UPGRADE" -eq 1 ]; then
-        log_info "Installing / Upgrading to Node.js 22.x..."
+        log_info "Synchronizing Mana Core (Node.js 22.x)..."
         
         # Try Nodesource first
         if command -v apt-get &> /dev/null; then
@@ -103,7 +150,7 @@ install_panel() {
 
         # Fallback to direct Node.js v22 binary installation if apt/nodesource failed
         if [ "$CURRENT_NODE_MAJOR" -lt 22 ]; then
-            log_info "Installing Node.js 22.13.1 directly from binary tarball..."
+            log_info "Forcing direct Mana core binary integration (v22.13.1)..."
             ARCH=$(uname -m)
             case "$ARCH" in
                 x86_64) NODE_ARCH="x64" ;;
@@ -122,68 +169,73 @@ install_panel() {
     fi
 
     if command -v node &> /dev/null; then
-        log_success "Node.js $(node -v) is ready."
+        log_success "Mana Core Active: Node.js $(node -v)"
     else
-        log_error "Node.js installation could not be completed automatically."
+        log_error "Mana core synchronization failed."
     fi
     
     # Install PM2 globally
     if ! command -v pm2 &> /dev/null; then
-        log_info "Installing PM2 locally and globally..."
+        log_info "Summoning Process Manager (PM2)..."
         sudo npm install -g pm2 || true
         npm install pm2 -D
     else
-        log_success "PM2 is already installed."
+        log_success "PM2 Process Manager is already bound."
     fi
 
     # Docker Setup
-    log_info "Installing Docker..."
+    log_info "Opening Dimensional Rift (Docker)..."
     if ! command -v docker &> /dev/null; then
         curl -fsSL https://get.docker.com | sh || true
         if command -v systemctl &> /dev/null; then
             sudo systemctl enable --now docker || true
         fi
     else
-        log_success "Docker is already installed."
+        log_success "Dimensional Rift is already open."
     fi
 
+    progress_bar 2 "Extracting NTH Core Modules"
 
-    log_info "Downloading and setting up the NTH Panel..."
-    
     # Check if we are already in the NTH directory or matching folder names
     if [ -f "package.json" ] && grep -q "react-example" "package.json" 2>/dev/null; then
-        log_info "Running setup in current directory..."
+        log_info "Target acquired in current operational zone..."
         WORK_DIR="."
     elif [ -d "NTH" ]; then
-        log_info "The 'NTH' folder already exists. Running setup inside it..."
+        log_info "Found existing 'NTH' fortress. Entering..."
         WORK_DIR="NTH"
     elif [ -d "Jtg" ]; then
-        log_info "Found existing 'Jtg' folder, renaming to 'NTH'..."
+        log_info "Found existing 'Jtg' domain, converting to 'NTH'..."
         mv Jtg NTH
         WORK_DIR="NTH"
     else
-        log_info "Cloning from GitHub..."
+        log_info "Cloning repository from GitHub Gates..."
         git clone https://github.com/NightLord-pro/NTH
         WORK_DIR="NTH"
     fi
     
     # Navigate into the directory
-    cd "$WORK_DIR" || { log_error "Failed to enter the directory!"; return; }
+    cd "$WORK_DIR" || { log_error "Failed to cross the threshold!"; return; }
     
-    # Ensure .env exists
+    # Ensure .env exists with default port 2424
     if [ ! -f ".env" ]; then
-        log_info "Setting up .env file..."
+        log_info "Forging system configuration (.env)..."
         if [ -f ".env.example" ]; then
             cp .env.example .env
         else
-            echo "PORT=6767" > .env
+            echo "PORT=2424" > .env
             echo "JWT_SECRET=$(head -c 32 /dev/urandom | base64)" >> .env
+        fi
+    else
+        if grep -q "PORT=" .env; then
+            sed -i 's/^PORT=.*/PORT=2424/' .env
+        else
+            echo "PORT=2424" >> .env
         fi
     fi
     
-    # Ensure ecosystem.config.cjs exists for PM2
+    # Ensure ecosystem.config.cjs exists for PM2 using port 2424
     if [ ! -f "ecosystem.config.cjs" ]; then
-        log_info "Creating PM2 ecosystem file..."
+        log_info "Crafting PM2 system matrix..."
 cat << 'EOF' > ecosystem.config.cjs
 module.exports = {
   apps: [
@@ -197,7 +249,7 @@ module.exports = {
       max_memory_restart: "1G",
       env: {
         NODE_ENV: "production",
-        PORT: process.env.PORT || 6767
+        PORT: process.env.PORT || 2424
       }
     }
   ]
@@ -205,143 +257,121 @@ module.exports = {
 EOF
     fi
 
-    log_info "Installing Node.js dependencies..."
+    log_info "Absorbing Node dependencies..."
     npm i 
     
-    log_info "Building panel..."
+    progress_bar 3 "Compiling Monarch Architecture"
     npm run build
     
-    log_info "Creating admin user..."
-    npm run createuser
-    
-    log_info "Starting panel with PM2..."
+    log_info "Awakening panel process via PM2..."
     npx pm2 start ecosystem.config.cjs
     npx pm2 save || true
     
-    log_success "=========================================="
-    log_success " Panel successfully installed and started!"
-    log_success " Access URL: http://<YOUR-SERVER-IP>:6767"
-    log_success "=========================================="
+    log_success "========================================================"
+    log_success " GATE CLEARED: Panel successfully deployed and active!"
+    log_success " MONARCH DOMAIN: http://<YOUR-SERVER-IP>:2424"
+    log_success "--------------------------------------------------------"
+    log_info    " Default user pass are:"
+    log_info    " User => admin"
+    log_info    " Pass => admin123"
+    log_info    " Now you can change your pass in panel"
+    log_success "========================================================"
     
-    # Return to the main directory
     if [ "$WORK_DIR" = "NTH" ]; then
         cd ..
     fi
 
     # Final Automated Post-Installation Commands
-    log_info "Running final automated setup commands..."
+    log_info "Executing final shadow protocol commands..."
     cd NTH
     sudo apt install -y openjdk-21-jre-headless
     pm2 start ecosystem.config.cjs
-    log_success "All final commands executed successfully!"
+    log_success "Shadow Army summoned successfully!"
 }
 
 update_panel() {
     print_banner
-    echo -e "${BOLD}--- [2] Update NTH Panel ---${NC}\n"
+    echo -e "${BOLD}${VIOLET}--- [ GATE 2: UPDATE MONARCH MATRIX ] ---${NC}\n"
     
     if [ -f "package.json" ] && grep -q "react-example" "package.json" 2>/dev/null; then
         WORK_DIR="."
     elif [ -d "NTH" ]; then
         WORK_DIR="NTH"
     else
-        log_error "'NTH' directory not found! Please install the panel first (Option 1)."
+        log_error "'NTH' fortress not found! Clear Gate 1 first."
         return
     fi
     
-    cd "$WORK_DIR" || { log_error "Failed to enter the directory!"; return; }
+    cd "$WORK_DIR" || { log_error "Failed to enter fortress!"; return; }
         
-    log_info "Fetching updates from GitHub..."
+    loading_animation "Synchronizing with GitHub Repository"
     git stash || true
     git pull
     
-    log_info "Installing updated dependencies..."
+    log_info "Updating system dependencies..."
     npm i 
     
-    log_info "Rebuilding panel..."
+    progress_bar 2 "Rebuilding System Matrix"
     npm run build 
     
-    log_info "Restarting PM2 process..."
+    log_info "Restarting PM2 shadow threads..."
     npx pm2 restart nth-panel || npx pm2 restart all
     
-    log_success "Panel successfully updated and restarted!"
+    log_success "Monarch Matrix successfully upgraded and rebooted!"
     
     if [ "$WORK_DIR" = "NTH" ]; then
         cd ..
     fi
-}
-
-create_admin_user() {
-    print_banner
-    echo -e "${BOLD}--- [3] Create Admin User ---${NC}\n"
-    
-    if [ -f "package.json" ] && grep -q "react-example" "package.json" 2>/dev/null; then
-        WORK_DIR="."
-    elif [ -d "NTH" ]; then
-        WORK_DIR="NTH"
-    else
-        log_error "'NTH' directory not found!"
-        return
-    fi
-    
-    cd "$WORK_DIR" || { log_error "Failed to enter the directory!"; return; }
-    
-    log_info "Running admin creation script..."
-    npm run createuser
-    
-    if [ "$WORK_DIR" = "NTH" ]; then
-        cd ..
-    fi
-    log_success "Admin user created!"
 }
 
 restart_panel() {
     print_banner
-    echo -e "${BOLD}--- [4] Restart NTH Panel ---${NC}\n"
+    echo -e "${BOLD}${VIOLET}--- [ GATE 3: REBOOT SHADOW CORE ] ---${NC}\n"
     
-    log_info "Restarting panel..."
+    loading_animation "Rebooting Monarch Panel"
     if command -v pm2 &> /dev/null || npx pm2 -v &> /dev/null; then
         npx pm2 restart nth-panel || npx pm2 restart all
-        log_success "Panel restarted successfully!"
+        log_success "Shadow Core re-initialized successfully!"
     else
-        log_error "PM2 is not installed. Panel cannot be restarted via PM2."
+        log_error "PM2 not found. Cannot restart."
     fi
 }
 
-# Main menu loop
+# Main menu loop with Solo Leveling Dark Purple Theme
 while true; do
     print_banner
-    echo -e "  ${BOLD}1)${NC} Install Panel (Auto Setup - Port 6767)"
-    echo -e "  ${BOLD}2)${NC} Update Panel"
-    echo -e "  ${BOLD}3)${NC} Create Admin User"
-    echo -e "  ${BOLD}4)${NC} Restart Panel"
-    echo -e "  ${BOLD}5)${NC} Exit"
-    echo -e "\n========================================================"
-    read -p " Choose an option (1-5): " CHOICE
+    echo -e "  ${PURPLE}${BOLD}[ SELECT A COMMAND ]${NC}"
+    echo -e "  --------------------------------------------------------"
+    echo -e "    ${VIOLET}1)${NC} ${WHITE}Install Panel ${GRAY}(Auto Setup - Port 2424)${NC}"
+    echo -e "    ${VIOLET}2)${NC} ${WHITE}Update Panel${NC}"
+    echo -e "    ${VIOLET}3)${NC} ${WHITE}Restart Panel${NC}"
+    echo -e "    ${VIOLET}4)${NC} ${WHITE}Exit Gateway${NC}"
+    echo -e "  --------------------------------------------------------"
+    echo -n -e "  ${PURPLE}>> Choose option (1-4): ${NC}"
+    read -r CHOICE
 
     case "$CHOICE" in
         1)
             install_panel
-            read -p "Press Enter to return to main menu..."
+            echo -e "\n${PURPLE}Press [ENTER] to return to the Monarch's Menu...${NC}"
+            read -r
             ;;
         2)
             update_panel
-            read -p "Press Enter to return to main menu..."
+            echo -e "\n${PURPLE}Press [ENTER] to return to the Monarch's Menu...${NC}"
+            read -r
             ;;
         3)
-            create_admin_user
-            read -p "Press Enter to return to main menu..."
+            restart_panel
+            echo -e "\n${PURPLE}Press [ENTER] to return to the Monarch's Menu...${NC}"
+            read -r
             ;;
         4)
-            restart_panel
-            read -p "Press Enter to return to main menu..."
-            ;;
-        5)
-            echo -e "\n${YELLOW}Exiting script... Goodbye!${NC}\n"
+            echo -e "\n${MAGENTA}>> [SYSTEM] Closing Gateway... Goodbye, Monarch.${NC}\n"
             exit 0
             ;;
         *)
-            log_error "Invalid option! Please enter 1, 2, 3, 4, or 5."
+            log_error "Invalid gate option! Select between 1 and 4."
             sleep 1.5
             ;;
     esac

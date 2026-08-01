@@ -1,1 +1,89 @@
 @import "tailwindcss";
+
+@layer base {
+  body {
+    background-color: #0b0b0f;
+    color: #f1f5f9;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    overflow-x: hidden;
+  }
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(11, 11, 15, 0.8);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(109, 40, 217, 0.4);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(59, 130, 246, 0.8);
+}
+
+/* Glassmorphism & Neon Glow Utilities */
+.glass-panel {
+  background: rgba(18, 18, 26, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.glass-card {
+  background: rgba(22, 22, 32, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  transition: all 200ms ease-in-out;
+}
+
+.glass-card:hover {
+  border-color: rgba(109, 40, 217, 0.5);
+  box-shadow: 0 0 20px rgba(109, 40, 217, 0.25), 0 0 40px rgba(59, 130, 246, 0.15);
+  transform: translateY(-2px);
+}
+
+.rgb-glow {
+  box-shadow: 0 0 15px rgba(109, 40, 217, 0.4), 0 0 30px rgba(59, 130, 246, 0.2);
+}
+
+.neon-border-purple {
+  border-color: rgba(109, 40, 217, 0.6);
+  box-shadow: 0 0 12px rgba(109, 40, 217, 0.3);
+}
+
+.neon-border-blue {
+  border-color: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.3);
+}
+
+/* Custom RGB Glow keyframe */
+@keyframes rgbGlowPulse {
+  0% {
+    box-shadow: 0 0 12px rgba(109, 40, 217, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.6);
+  }
+  100% {
+    box-shadow: 0 0 12px rgba(109, 40, 217, 0.5);
+  }
+}
+
+.animate-rgb-glow {
+  animation: rgbGlowPulse 4s infinite ease-in-out;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.03); }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 3s infinite ease-in-out;
+}

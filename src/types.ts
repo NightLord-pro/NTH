@@ -60,7 +60,7 @@ export interface PlayerInfo {
 
 export interface PanelSettings {
   serverName: string;
-  serverAddress: string;
+  serverAddress?: string;
   logoUrl?: string;
   bgImageUrl: string;
   bgOpacity: number;
@@ -70,12 +70,16 @@ export interface PanelSettings {
   customJavaPath?: string;
   activeSoftware: string;
   activeVersion: string;
+  loginLogoUrl?: string;
+  loginBgUrl?: string;
+  loginBgPreset?: 'cyber' | 'space' | 'emerald' | 'sunset' | 'custom';
 }
 
 export interface ServerConfig {
   motd: string;
   maxPlayers: number;
   serverPort: number;
+  serverAddress?: string;
   gamemode: 'survival' | 'creative' | 'adventure' | 'spectator';
   difficulty: 'peaceful' | 'easy' | 'normal' | 'hard';
   onlineMode: boolean;
@@ -148,6 +152,7 @@ export interface ServerInstance {
   nodeName: string;
   status: ServerState;
   colorTag: 'emerald' | 'cyan' | 'purple' | 'amber' | 'rose' | 'indigo';
+  assignedUser?: string;
   isDefault?: boolean;
   dirName?: string;
   gamemode?: 'survival' | 'creative' | 'adventure' | 'spectator';
@@ -155,5 +160,6 @@ export interface ServerInstance {
   onlineMode?: boolean;
   pvp?: boolean;
   commandBlocks?: boolean;
+  serverAddress?: string;
 }
 

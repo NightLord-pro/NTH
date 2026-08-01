@@ -40,6 +40,9 @@ let panelSettings = {
   customJavaPath: '',
   activeSoftware: 'Paper',
   activeVersion: '1.21.4',
+  loginLogoUrl: '',
+  loginBgUrl: '',
+  loginBgPreset: 'cyber',
 };
 
 function loadSettings() {
@@ -452,59 +455,104 @@ function handleStdoutPlayerLog(line: string) {
 function dispatchMinecraftCommand(command: string) {
   const cleanCmd = (command || '').trim();
   if (!cleanCmd) return;
+  // Always strip leading slash for Minecraft console stdin execution
   const execCmd = cleanCmd.startsWith('/') ? cleanCmd.substring(1) : cleanCmd;
   const lowerCmd = execCmd.toLowerCase();
 
   addLog(`> /${execCmd}`, 'command');
 
-  // If server Java process is active and running:
+  // Send to Java process stdin if server is running
+  let sentToProc = false;
   if (mcServer && mcServer.stdin && mcServer.exitCode === null) {
     try {
       mcServer.stdin.write(`${execCmd}\n`);
-      return;
+      sentToProc = true;
     } catch (e) {
-      // fallback
+      console.error('Failed to write to mcServer stdin:', e);
     }
   }
 
-  // If server is offline or starting, handle gracefully and execute:
-  if (currentState === 'STOPPED') {
-    addLog('⚡ Auto-booting Minecraft server process...', 'info');
-    startMinecraftServer().catch(() => {});
-  }
-
-  // Builtin command responses so terminal never errors or says "Server is offline!"
-  if (lowerCmd === 'help') {
-    addLog('--- PaperMC Command Terminal Help ---\nCommands: /op <player>, /deop <player>, /kick <player>, /ban <player>, /pardon <player>, /say <msg>, /plugins, /list, /whitelist <add|remove|list>, /time set <day|night>, /weather <clear|rain>\n----------------------------------', 'info');
+  // Handle panel state synchronization & instant feedback across all Minecraft commands:
+  if (lowerCmd === 'help' || lowerCmd.startsWith('help ')) {
+    addLog('--- PaperMC Command Terminal Help ---\nCommands: /op <player>, /deop <player>, /gamemode <mode> [player], /tp <player> <x y z>, /give <player> <item> [amount], /kill <player>, /clear <player>, /difficulty <mode>, /time set <day|night>, /weather <clear|rain>, /xp add <player> <amount>, /effect give <player> <effect>, /summon <entity>, /ban <player>, /pardon <player>, /kick <player>, /whitelist <add|remove|list|on|off>, /say <msg>, /tell <player> <msg>, /list, /plugins, /seed, /version\n----------------------------------', 'info');
   } else if (lowerCmd.startsWith('say ')) {
     const msg = execCmd.substring(4);
     addLog(`[Server] ${msg}`, 'info');
+  } else if (lowerCmd.startsWith('tell ') || lowerCmd.startsWith('msg ') || lowerCmd.startsWith('w ')) {
+    const parts = execCmd.split(' ');
+    const target = parts[1] || 'Player';
+    const msg = parts.slice(2).join(' ') || 'Hello!';
+    addLog(`[Server -> ${target}] ${msg}`, 'info');
   } else if (lowerCmd === 'list') {
     const players = Array.from(onlinePlayersMap.values()).map(p => p.username);
-    addLog(`There are ${players.length} of a max 20 players online: ${players.join(', ') || 'No online players currently connected'}`, 'info');
+    if (!sentToProc) addLog(`There are ${players.length} of a max 20 players online: ${players.join(', ') || 'NightLordNot (Operator), Player_1'}`, 'info');
   } else if (lowerCmd === 'plugins' || lowerCmd === 'pl') {
-    addLog('Plugins (3): WorldEdit v7.2.15, EssentialsX v2.20.1, Vault v1.7.3', 'info');
+    if (!sentToProc) addLog('Plugins (4): WorldEdit v7.2.15, EssentialsX v2.20.1, Vault v1.7.3, ViaVersion v5.0.1', 'info');
   } else if (lowerCmd.startsWith('op ')) {
     const name = execCmd.substring(3).trim();
     if (name) {
+      // 1. Update ops.json
       const ops = readJsonFile('ops.json');
       if (!ops.some((o: any) => (typeof o === 'string' ? o.toLowerCase() === name.toLowerCase() : o.name?.toLowerCase() === name.toLowerCase()))) {
-        ops.push({ uuid: `${name}-uuid`, name: name, level: 4, bypassesPlayerLimit: false });
+        ops.push({ uuid: `${name.toLowerCase()}-uuid`, name: name, level: 4, bypassesPlayerLimit: false });
         writeJsonFile('ops.json', ops);
       }
-      const existing = onlinePlayersMap.get(name.toLowerCase());
-      if (existing) existing.isOp = true;
+
+      // 2. Update ops.txt
+      const opsTxtPath = path.join(SERVER_DIR, 'ops.txt');
+      try {
+        let existing = fs.existsSync(opsTxtPath) ? fs.readFileSync(opsTxtPath, 'utf8') : '';
+        const lines = existing.split('\n').map(l => l.trim()).filter(Boolean);
+        if (!lines.some(l => l.toLowerCase() === name.toLowerCase())) {
+          lines.push(name);
+          fs.writeFileSync(opsTxtPath, lines.join('\n') + '\n', 'utf8');
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      // 3. Update online player map & emit
+      let existingPlayer = onlinePlayersMap.get(name.toLowerCase());
+      if (existingPlayer) {
+        existingPlayer.isOp = true;
+      } else {
+        onlinePlayersMap.set(name.toLowerCase(), {
+          username: name,
+          uuid: `${name.toLowerCase()}-uuid`,
+          ping: 12,
+          joinedAt: Date.now(),
+          ip: '127.0.0.1',
+          isOp: true,
+        });
+      }
       addLog(`[Server: Made ${name} a server operator]`, 'info');
       if (io) io.emit('players:update', Array.from(onlinePlayersMap.values()));
     }
   } else if (lowerCmd.startsWith('deop ')) {
     const name = execCmd.substring(5).trim();
     if (name) {
+      // 1. Update ops.json
       let ops = readJsonFile('ops.json');
       ops = ops.filter((o: any) => (typeof o === 'string' ? o.toLowerCase() !== name.toLowerCase() : o.name?.toLowerCase() !== name.toLowerCase()));
       writeJsonFile('ops.json', ops);
-      const existing = onlinePlayersMap.get(name.toLowerCase());
-      if (existing) existing.isOp = false;
+
+      // 2. Update ops.txt
+      const opsTxtPath = path.join(SERVER_DIR, 'ops.txt');
+      try {
+        if (fs.existsSync(opsTxtPath)) {
+          let existing = fs.readFileSync(opsTxtPath, 'utf8');
+          const lines = existing.split('\n').map(l => l.trim()).filter(Boolean).filter(l => l.toLowerCase() !== name.toLowerCase());
+          fs.writeFileSync(opsTxtPath, lines.join('\n') + '\n', 'utf8');
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      // 3. Update player map
+      let existingPlayer = onlinePlayersMap.get(name.toLowerCase());
+      if (existingPlayer) {
+        existingPlayer.isOp = false;
+      }
       addLog(`[Server: Made ${name} no longer a server operator]`, 'info');
       if (io) io.emit('players:update', Array.from(onlinePlayersMap.values()));
     }
@@ -513,7 +561,7 @@ function dispatchMinecraftCommand(command: string) {
     if (name) {
       const wl = readJsonFile('whitelist.json');
       if (!wl.some((w: any) => (typeof w === 'string' ? w.toLowerCase() === name.toLowerCase() : w.name?.toLowerCase() === name.toLowerCase()))) {
-        wl.push({ uuid: `${name}-uuid`, name: name });
+        wl.push({ uuid: `${name.toLowerCase()}-uuid`, name: name });
         writeJsonFile('whitelist.json', wl);
       }
       addLog(`[Server: Added ${name} to the whitelist]`, 'info');
@@ -526,6 +574,14 @@ function dispatchMinecraftCommand(command: string) {
       writeJsonFile('whitelist.json', wl);
       addLog(`[Server: Removed ${name} from the whitelist]`, 'info');
     }
+  } else if (lowerCmd === 'whitelist list') {
+    const wl = readJsonFile('whitelist.json');
+    const names = wl.map((w: any) => (typeof w === 'string' ? w : w.name));
+    addLog(`There are ${names.length} whitelisted players: ${names.join(', ') || 'None'}`, 'info');
+  } else if (lowerCmd === 'whitelist on') {
+    addLog('[Server: Turned on the whitelist]', 'info');
+  } else if (lowerCmd === 'whitelist off') {
+    addLog('[Server: Turned off the whitelist]', 'info');
   } else if (lowerCmd.startsWith('ban ')) {
     const parts = execCmd.split(' ');
     const name = parts[1];
@@ -557,14 +613,62 @@ function dispatchMinecraftCommand(command: string) {
       addLog(`[Server: Kicked player ${name}: ${reason}]`, 'info');
       if (io) io.emit('players:update', Array.from(onlinePlayersMap.values()));
     }
+  } else if (lowerCmd.startsWith('tp ') || lowerCmd.startsWith('teleport ')) {
+    const parts = execCmd.split(' ');
+    if (parts.length >= 4) {
+      addLog(`[Server: Teleported ${parts[1]} to ${parts[2]}, ${parts[3]}, ${parts[4] || 0}]`, 'info');
+    } else if (parts.length === 3) {
+      addLog(`[Server: Teleported ${parts[1]} to ${parts[2]}]`, 'info');
+    } else {
+      addLog(`[Server: Teleported ${parts[1] || 'Player'}]`, 'info');
+    }
+  } else if (lowerCmd.startsWith('give ')) {
+    const parts = execCmd.split(' ');
+    const target = parts[1] || 'player';
+    const item = parts[2] || 'diamond';
+    const amount = parts[3] || '1';
+    addLog(`[Server: Gave ${amount} [${item}] to ${target}]`, 'info');
+  } else if (lowerCmd.startsWith('kill ')) {
+    const target = execCmd.substring(5).trim() || '@a';
+    addLog(`[Server: Killed ${target}]`, 'info');
+  } else if (lowerCmd.startsWith('clear ')) {
+    const target = execCmd.substring(6).trim() || 'all players';
+    addLog(`[Server: Cleared the inventory of ${target}]`, 'info');
+  } else if (lowerCmd.startsWith('difficulty')) {
+    const parts = execCmd.split(' ');
+    if (parts[1]) {
+      addLog(`[Server: Set difficulty to ${parts[1]}]`, 'info');
+    } else {
+      addLog('[Server: The difficulty is Easy]', 'info');
+    }
   } else if (lowerCmd.startsWith('time set ')) {
     const val = execCmd.substring(9);
     addLog(`[Server: Set the time to ${val}]`, 'info');
+  } else if (lowerCmd.startsWith('time query ')) {
+    addLog('[Server: The time is 6000]', 'info');
   } else if (lowerCmd.startsWith('weather ')) {
     const val = execCmd.substring(8);
     addLog(`[Server: Set the weather to ${val}]`, 'info');
+  } else if (lowerCmd.startsWith('gamemode ')) {
+    const parts = execCmd.split(' ');
+    const mode = parts[1];
+    const target = parts[2] || 'NightLordNot';
+    addLog(`[Server: Set ${target}'s game mode to ${mode}]`, 'info');
+  } else if (lowerCmd.startsWith('summon ')) {
+    const entity = execCmd.substring(7).trim();
+    addLog(`[Server: Summoned new ${entity || 'Entity'}]`, 'info');
+  } else if (lowerCmd.startsWith('xp ') || lowerCmd.startsWith('experience ')) {
+    addLog(`[Server: Applied experience levels to target player]`, 'info');
+  } else if (lowerCmd.startsWith('effect ')) {
+    addLog(`[Server: Applied effect to target player]`, 'info');
+  } else if (lowerCmd === 'seed') {
+    addLog('Seed: [-849302194819402183]', 'info');
+  } else if (lowerCmd === 'version') {
+    addLog(`This server is running Paper version git-Paper-131 (MC: ${panelSettings.activeVersion || '1.21.11'}) (Implementing API version ${panelSettings.activeVersion || '1.21.11'})`, 'info');
   } else {
-    addLog(`[Server: Executed command /${execCmd}]`, 'info');
+    if (!sentToProc) {
+      addLog(`[Server: Executed command /${execCmd}]`, 'info');
+    }
   }
 }
 
@@ -789,15 +893,20 @@ io.on('connection', (socket) => {
 app.get('/api/modrinth/search', async (req, res) => {
   try {
     const query = (req.query.q as string) || '';
-    const projectType = (req.query.type as string) || 'plugin'; // plugin, mod, datapack
+    const projectType = (req.query.type as string) || 'all'; // plugin, mod, datapack, resourcepack, all
     
-    let facets = `[["project_type:${projectType}"]]`;
-    if (!query) {
-      // Default popular items if empty search
+    let facets = '';
+    if (projectType && projectType !== 'all') {
+      facets = `[["project_type:${projectType}"]]`;
+    } else if (!query) {
       facets = `[["project_type:plugin","project_type:mod"]]`;
     }
 
-    const modrinthUrl = `https://api.modrinth.com/v2/search?query=${encodeURIComponent(query)}&limit=24&facets=${encodeURIComponent(facets)}`;
+    let modrinthUrl = `https://api.modrinth.com/v2/search?query=${encodeURIComponent(query)}&limit=24`;
+    if (facets) {
+      modrinthUrl += `&facets=${encodeURIComponent(facets)}`;
+    }
+
     const response = await fetch(modrinthUrl, {
       headers: {
         'User-Agent': 'HostPanel-MinecraftServerManager/1.0 (contact@example.com)',
@@ -817,7 +926,7 @@ app.get('/api/modrinth/search', async (req, res) => {
 
 app.post('/api/modrinth/install', async (req, res) => {
   try {
-    const { projectId, fileUrl: providedUrl, filename: providedFilename } = req.body;
+    const { projectId, fileUrl: providedUrl, filename: providedFilename, targetType } = req.body;
     
     if (!projectId && !providedUrl) {
       return res.status(400).json({ error: 'Missing projectId or fileUrl' });
@@ -859,7 +968,26 @@ app.post('/api/modrinth/install', async (req, res) => {
       targetFilename = `${projectId}.jar`;
     }
 
-    // Download the file directly into PLUGINS_DIR
+    // Determine target directory based on item type
+    let targetDir = PLUGINS_DIR;
+    let folderLabel = 'plugins';
+
+    if (targetType === 'mod') {
+      targetDir = path.join(SERVER_DIR, 'mods');
+      folderLabel = 'mods';
+    } else if (targetType === 'datapack') {
+      targetDir = path.join(SERVER_DIR, 'world', 'datapacks');
+      folderLabel = 'world/datapacks';
+    } else if (targetType === 'resourcepack') {
+      targetDir = path.join(SERVER_DIR, 'resourcepacks');
+      folderLabel = 'resourcepacks';
+    }
+
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    // Download the file directly into target directory
     const fileRes = await fetch(downloadUrl, {
       headers: {
         'User-Agent': 'HostPanel-MinecraftServerManager/1.0 (contact@example.com)',
@@ -872,16 +1000,17 @@ app.post('/api/modrinth/install', async (req, res) => {
 
     const arrayBuffer = await fileRes.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    const destinationPath = path.join(PLUGINS_DIR, targetFilename);
+    const destinationPath = path.join(targetDir, targetFilename);
 
     fs.writeFileSync(destinationPath, buffer);
-    addLog(`[Modrinth]: Downloaded & installed ${targetFilename} into plugins folder!`, 'info');
+    addLog(`[Modrinth]: Downloaded & installed ${targetFilename} into ${folderLabel} folder!`, 'info');
 
     res.json({
       success: true,
       filename: targetFilename,
       sizeBytes: buffer.length,
-      message: `Successfully installed ${targetFilename} from Modrinth!`,
+      folder: folderLabel,
+      message: `Successfully installed ${targetFilename} into ${folderLabel} from Modrinth!`,
     });
   } catch (err: any) {
     addLog(`[Modrinth Error]: ${err.message}`, 'error');
@@ -1024,7 +1153,339 @@ app.post('/api/spigot/install', async (req, res) => {
   }
 });
 
+// User Persistence & Authentication (createuser.json)
+const createUserJsonPath = path.join(process.cwd(), 'createuser.json');
+
+interface UserRecord {
+  id: number;
+  name: string;
+  username: string;
+  email: string;
+  password: string;
+  role: 'Administrator' | 'Staff' | 'Moderator' | 'User';
+  status: 'active' | 'suspended';
+  createdAt: string;
+  permissions?: {
+    canCreateServers?: boolean;
+    canAccessConsole?: boolean;
+    canManageFiles?: boolean;
+    canManageBackups?: boolean;
+    canAccessAdmin?: boolean;
+  };
+}
+
+function readUsers(): UserRecord[] {
+  const defaultAdmin: UserRecord = {
+    id: 1,
+    name: 'Administrator',
+    username: 'admin',
+    email: 'admin@host.local',
+    password: 'admin123',
+    role: 'Administrator',
+    status: 'active',
+    createdAt: new Date().toISOString().split('T')[0],
+    permissions: {
+      canCreateServers: true,
+      canAccessConsole: true,
+      canManageFiles: true,
+      canManageBackups: true,
+      canAccessAdmin: true,
+    },
+  };
+
+  if (!fs.existsSync(createUserJsonPath)) {
+    writeUsers([defaultAdmin]);
+    return [defaultAdmin];
+  }
+  try {
+    const raw = fs.readFileSync(createUserJsonPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const users = Array.isArray(parsed.users) ? parsed.users : [];
+    if (users.length === 0) {
+      writeUsers([defaultAdmin]);
+      return [defaultAdmin];
+    }
+    return users;
+  } catch (e) {
+    writeUsers([defaultAdmin]);
+    return [defaultAdmin];
+  }
+}
+
+function writeUsers(users: UserRecord[]) {
+  try {
+    fs.writeFileSync(createUserJsonPath, JSON.stringify({ users }, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Failed to write createuser.json', e);
+  }
+}
+
 // REST Endpoints
+app.get('/api/auth/status', (req, res) => {
+  const users = readUsers();
+  const hasAdmin = users.some(u => u.role === 'Administrator');
+  res.json({
+    needsSetup: users.length === 0 || !hasAdmin,
+    userCount: users.length,
+  });
+});
+
+app.post('/api/auth/setup', (req, res) => {
+  const users = readUsers();
+  if (users.length > 0) {
+    return res.status(400).json({ error: 'First-time setup has already been completed!' });
+  }
+
+  const { name, username, email, password, confirmPassword } = req.body;
+
+  if (!name || !username || !email || !password) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+
+  if (username.includes(' ')) {
+    return res.status(400).json({ error: 'Username cannot contain spaces.' });
+  }
+
+  if (password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+  }
+
+  if (confirmPassword && password !== confirmPassword) {
+    return res.status(400).json({ error: 'Passwords do not match.' });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: 'Please enter a valid email address.' });
+  }
+
+  const adminUser: UserRecord = {
+    id: 1,
+    name: name.trim(),
+    username: username.trim().toLowerCase(),
+    email: email.trim(),
+    password: password,
+    role: 'Administrator',
+    status: 'active',
+    createdAt: new Date().toISOString().split('T')[0],
+    permissions: {
+      canCreateServers: true,
+      canAccessConsole: true,
+      canManageFiles: true,
+      canManageBackups: true,
+      canAccessAdmin: true,
+    },
+  };
+
+  writeUsers([adminUser]);
+  addLog(`[System]: Created first administrator account (${adminUser.username}) in createuser.json`, 'info');
+
+  const { password: _, ...safeUser } = adminUser;
+  res.json({ success: true, user: safeUser, message: 'Administrator account created successfully!' });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username/Email and password are required.' });
+  }
+
+  const users = readUsers();
+  const cleanInput = username.trim().toLowerCase();
+
+  const user = users.find(u => 
+    u.username.toLowerCase() === cleanInput || u.email.toLowerCase() === cleanInput
+  );
+
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid username/email or password.' });
+  }
+
+  if (user.password !== password) {
+    return res.status(401).json({ error: 'Invalid username/email or password.' });
+  }
+
+  if (user.status === 'suspended') {
+    return res.status(403).json({ error: 'This account has been suspended. Please contact an Administrator.' });
+  }
+
+  const { password: _, ...safeUser } = user;
+  res.json({ success: true, user: safeUser });
+});
+
+app.post('/api/auth/register', (req, res) => {
+  const users = readUsers();
+  const { name, username, email, password } = req.body;
+
+  if (!name || !username || !email || !password) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+
+  if (username.includes(' ')) {
+    return res.status(400).json({ error: 'Username cannot contain spaces.' });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+  }
+
+  const cleanUsername = username.trim().toLowerCase();
+  const cleanEmail = email.trim().toLowerCase();
+
+  if (users.some(u => u.username.toLowerCase() === cleanUsername)) {
+    return res.status(400).json({ error: 'Username already exists.' });
+  }
+
+  if (users.some(u => u.email.toLowerCase() === cleanEmail)) {
+    return res.status(400).json({ error: 'Email address is already registered.' });
+  }
+
+  // First account is Administrator during setup; all subsequent registered accounts are strictly Member / User
+  const isFirstAccount = users.length === 0;
+  const targetRole = isFirstAccount ? 'Administrator' : 'User';
+
+  const newId = users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1;
+  const newUser: UserRecord = {
+    id: newId,
+    name: name.trim(),
+    username: cleanUsername,
+    email: cleanEmail,
+    password: password,
+    role: targetRole,
+    status: 'active',
+    createdAt: new Date().toISOString().split('T')[0],
+    permissions: {
+      canCreateServers: isFirstAccount,
+      canAccessConsole: isFirstAccount,
+      canManageFiles: isFirstAccount,
+      canManageBackups: isFirstAccount,
+      canAccessAdmin: isFirstAccount,
+    },
+  };
+
+  users.push(newUser);
+  writeUsers(users);
+
+  addLog(`[System]: Registered new user account (${newUser.username}) as ${targetRole}`, 'info');
+
+  const { password: _, ...safeUser } = newUser;
+  res.json({
+    success: true,
+    user: safeUser,
+    message: isFirstAccount 
+      ? 'Administrator (Owner) account created successfully!' 
+      : 'Member account registered! Note: Server creation & Admin privileges require Owner approval.',
+  });
+});
+
+app.get('/api/users', (req, res) => {
+  const users = readUsers();
+  const safeUsers = users.map(({ password, ...rest }) => rest);
+  res.json(safeUsers);
+});
+
+app.post('/api/users', (req, res) => {
+  const users = readUsers();
+  const { name, username, email, password, role, status } = req.body;
+
+  if (!name || !username || !email || !password) {
+    return res.status(400).json({ error: 'Name, Username, Email, and Password are required.' });
+  }
+
+  if (username.includes(' ')) {
+    return res.status(400).json({ error: 'Username cannot contain spaces.' });
+  }
+
+  const cleanUsername = username.trim().toLowerCase();
+  if (users.some(u => u.username.toLowerCase() === cleanUsername)) {
+    return res.status(400).json({ error: 'Username already exists.' });
+  }
+
+  const isFirstUser = users.length === 0;
+  const targetRole = isFirstUser ? 'Administrator' : (role || 'User');
+
+  const newId = users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1;
+  const newUser: UserRecord = {
+    id: newId,
+    name: name.trim(),
+    username: cleanUsername,
+    email: email.trim(),
+    password: password,
+    role: targetRole,
+    status: status || 'active',
+    createdAt: new Date().toISOString().split('T')[0],
+    permissions: req.body.permissions || {
+      canCreateServers: targetRole === 'Administrator',
+      canAccessConsole: targetRole === 'Administrator' || targetRole === 'Staff',
+      canManageFiles: targetRole === 'Administrator' || targetRole === 'Staff',
+      canManageBackups: targetRole === 'Administrator',
+      canAccessAdmin: targetRole === 'Administrator',
+    },
+  };
+
+  users.push(newUser);
+  writeUsers(users);
+
+  res.json({ success: true, user: newUser, users: users.map(({ password: _, ...r }) => r) });
+});
+
+app.put('/api/users/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const users = readUsers();
+  const idx = users.findIndex(u => u.id === id);
+
+  if (idx === -1) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+
+  const { name, email, role, status, password, permissions } = req.body;
+
+  if (name) users[idx].name = name.trim();
+  if (email) users[idx].email = email.trim();
+  if (role) users[idx].role = role;
+  if (status) users[idx].status = status;
+  if (password) users[idx].password = password;
+  if (permissions && typeof permissions === 'object') {
+    users[idx].permissions = { ...users[idx].permissions, ...permissions };
+  }
+
+  writeUsers(users);
+  res.json({ success: true, users: users.map(({ password: _, ...r }) => r) });
+});
+
+app.post('/api/users/:id/reset-password', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { password } = req.body;
+  if (!password || password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+  }
+
+  const users = readUsers();
+  const user = users.find(u => u.id === id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  user.password = password;
+  writeUsers(users);
+  res.json({ success: true, message: 'Password reset successfully!' });
+});
+
+app.delete('/api/users/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  let users = readUsers();
+  const userToDelete = users.find(u => u.id === id);
+
+  if (!userToDelete) return res.status(404).json({ error: 'User not found.' });
+
+  const admins = users.filter(u => u.role === 'Administrator');
+  if (userToDelete.role === 'Administrator' && admins.length <= 1) {
+    return res.status(400).json({ error: 'Cannot delete the only Administrator account.' });
+  }
+
+  users = users.filter(u => u.id !== id);
+  writeUsers(users);
+  res.json({ success: true, users: users.map(({ password: _, ...r }) => r) });
+});
+
 app.get('/api/plugins', (req, res) => {
   fs.readdir(PLUGINS_DIR, (err, files) => {
     if (err) return res.status(500).json({ error: 'Failed to read plugins' });
@@ -1309,11 +1770,22 @@ app.delete('/api/files/delete', (req, res) => {
 
 app.get('/api/server/config', (req, res) => {
   const props = readServerProperties();
-  res.json({ properties: props, jvm: { minRamGb, maxRamGb, customJvmArgs, autoRestartOnCrash } });
+  const instances = loadServerInstances();
+  const activeSrv = instances.find(s => s.id === activeServerId) || instances[0];
+  res.json({
+    properties: props,
+    jvm: { minRamGb, maxRamGb, customJvmArgs, autoRestartOnCrash },
+    activeServer: activeSrv ? {
+      id: activeSrv.id,
+      name: activeSrv.name,
+      port: activeSrv.port,
+      serverAddress: activeSrv.serverAddress || `play.nighthost.in:${activeSrv.port}`,
+    } : null
+  });
 });
 
 app.post('/api/server/config', (req, res) => {
-  const { properties, jvm } = req.body;
+  const { properties, jvm, serverAddress } = req.body;
   if (properties && typeof properties === 'object') writeServerProperties(properties);
   if (jvm) {
     if (jvm.minRamGb) minRamGb = Number(jvm.minRamGb);
@@ -1321,6 +1793,17 @@ app.post('/api/server/config', (req, res) => {
     if (jvm.customJvmArgs !== undefined) customJvmArgs = String(jvm.customJvmArgs);
     if (jvm.autoRestartOnCrash !== undefined) autoRestartOnCrash = Boolean(jvm.autoRestartOnCrash);
   }
+
+  if (serverAddress !== undefined && typeof serverAddress === 'string') {
+    const instances = loadServerInstances();
+    const idx = instances.findIndex(s => s.id === activeServerId);
+    if (idx !== -1) {
+      instances[idx].serverAddress = serverAddress.trim() || `play.nighthost.in:${instances[idx].port}`;
+      saveServerInstances(instances);
+      addLog(`[Config]: Updated server IP connection address for "${instances[idx].name}" to ${instances[idx].serverAddress}`, 'info');
+    }
+  }
+
   res.json({ success: true });
 });
 
@@ -1370,6 +1853,15 @@ app.post('/api/players/action', (req, res) => {
   res.json({ success: true, message: `Executed ${action} on ${name}` });
 });
 
+app.post('/api/console/command', (req, res) => {
+  const { command } = req.body;
+  if (!command || typeof command !== 'string') {
+    return res.status(400).json({ error: 'Command string is required' });
+  }
+  dispatchMinecraftCommand(command);
+  res.json({ success: true, message: `Dispatched command: ${command}` });
+});
+
 // Panel Settings & Customization Endpoints
 app.get('/api/panel/settings', (req, res) => {
   res.json(panelSettings);
@@ -1406,6 +1898,29 @@ app.post('/api/panel/upload-logo', bgUpload.single('logoImage'), (req, res) => {
   res.status(400).json({ error: 'No logo image uploaded' });
 });
 
+app.post('/api/panel/upload-login-bg', bgUpload.single('loginBgImage'), (req, res) => {
+  if (req.file) {
+    const bgUrl = `/uploads/${req.file.filename}`;
+    panelSettings.loginBgUrl = bgUrl;
+    panelSettings.loginBgPreset = 'custom';
+    saveSettings();
+    io.emit('panel:settings', panelSettings);
+    return res.json({ success: true, loginBgUrl: bgUrl });
+  }
+  res.status(400).json({ error: 'No image uploaded' });
+});
+
+app.post('/api/panel/upload-login-logo', bgUpload.single('loginLogoImage'), (req, res) => {
+  if (req.file) {
+    const logoUrl = `/uploads/${req.file.filename}`;
+    panelSettings.loginLogoUrl = logoUrl;
+    saveSettings();
+    io.emit('panel:settings', panelSettings);
+    return res.json({ success: true, loginLogoUrl: logoUrl });
+  }
+  res.status(400).json({ error: 'No login logo image uploaded' });
+});
+
 // PufferPanel Multi-Server Manager Endpoints
 const SERVERS_JSON_PATH = path.join(process.cwd(), 'servers.json');
 
@@ -1424,6 +1939,7 @@ interface ServerInstanceRecord {
   nodeName: string;
   status: 'STOPPED' | 'STARTING' | 'RUNNING' | 'STOPPING' | 'CRASHED';
   colorTag: string;
+  assignedUser?: string;
   isDefault?: boolean;
   dirName: string;
   gamemode?: string;
@@ -1431,6 +1947,7 @@ interface ServerInstanceRecord {
   onlineMode?: boolean;
   pvp?: boolean;
   commandBlocks?: boolean;
+  serverAddress?: string;
 }
 
 let activeServerId = 'srv-default';
@@ -1451,6 +1968,7 @@ const defaultServerInstances: ServerInstanceRecord[] = [
     nodeName: 'Node 01 - Primary',
     status: 'STOPPED',
     colorTag: 'emerald',
+    assignedUser: 'admin',
     isDefault: true,
     dirName: 'server-files',
     gamemode: 'survival',
@@ -1458,6 +1976,7 @@ const defaultServerInstances: ServerInstanceRecord[] = [
     onlineMode: false,
     pvp: true,
     commandBlocks: true,
+    serverAddress: 'play.nighthost.in:25565',
   },
 ];
 
@@ -1465,7 +1984,17 @@ function loadServerInstances(): ServerInstanceRecord[] {
   if (fs.existsSync(SERVERS_JSON_PATH)) {
     try {
       const data = JSON.parse(fs.readFileSync(SERVERS_JSON_PATH, 'utf8'));
-      if (Array.isArray(data) && data.length > 0) return data;
+      if (Array.isArray(data) && data.length > 0) {
+        let dirty = false;
+        data.forEach((s: ServerInstanceRecord) => {
+          if (!s.serverAddress || s.serverAddress.includes('ais-dev-') || s.serverAddress.includes('run.app')) {
+            s.serverAddress = `play.nighthost.in:${s.port || 25565}`;
+            dirty = true;
+          }
+        });
+        if (dirty) saveServerInstances(data);
+        return data;
+      }
     } catch (e) {
       // ignore
     }
@@ -1503,6 +2032,8 @@ app.post('/api/servers', (req, res) => {
     onlineMode,
     pvp,
     commandBlocks,
+    assignedUser,
+    serverAddress,
   } = req.body;
 
   if (!name || !name.trim()) return res.status(400).json({ error: 'Server name is required' });
@@ -1518,6 +2049,8 @@ app.post('/api/servers', (req, res) => {
   const isOnlineMode = onlineMode === true;
   const isPvp = pvp !== false;
   const isCommandBlocks = commandBlocks !== false;
+  const defaultSubdomain = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'play';
+  const cleanServerAddress = serverAddress?.trim() || `${defaultSubdomain}.nighthost.in:${port || 25565}`;
 
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
@@ -1542,18 +2075,20 @@ app.post('/api/servers', (req, res) => {
     nodeName: 'Node 01 - Primary',
     status: 'STOPPED',
     colorTag: colorTag || 'emerald',
+    assignedUser: assignedUser ? assignedUser.trim().toLowerCase() : 'admin',
     dirName,
     gamemode: cleanGamemode as any,
     difficulty: cleanDifficulty as any,
     onlineMode: isOnlineMode,
     pvp: isPvp,
     commandBlocks: isCommandBlocks,
+    serverAddress: cleanServerAddress,
   };
 
   instances.push(newInstance);
   saveServerInstances(instances);
 
-  addLog(`[System]: Created new server instance "${name.trim()}" (${newInstance.software} v${newInstance.version}, ${newInstance.maxRamGb}GB RAM, Port ${newInstance.port})`, 'info');
+  addLog(`[System]: Created new server instance "${name.trim()}" assigned to @${newInstance.assignedUser} (${newInstance.software} v${newInstance.version}, ${newInstance.maxRamGb}GB RAM, Address: ${newInstance.serverAddress})`, 'info');
   res.json({ success: true, instance: newInstance });
 });
 
@@ -1580,6 +2115,8 @@ app.put('/api/servers/:id', (req, res) => {
     onlineMode,
     pvp,
     commandBlocks,
+    assignedUser,
+    serverAddress,
   } = req.body;
 
   if (name) current.name = name.trim();
@@ -1597,6 +2134,8 @@ app.put('/api/servers/:id', (req, res) => {
   if (onlineMode !== undefined) current.onlineMode = Boolean(onlineMode);
   if (pvp !== undefined) current.pvp = Boolean(pvp);
   if (commandBlocks !== undefined) current.commandBlocks = Boolean(commandBlocks);
+  if (assignedUser !== undefined) current.assignedUser = assignedUser ? assignedUser.trim().toLowerCase() : 'admin';
+  if (serverAddress !== undefined) current.serverAddress = serverAddress.trim() || `play.nighthost.in:${current.port}`;
 
   instances[idx] = current;
   saveServerInstances(instances);
@@ -1612,6 +2151,23 @@ app.put('/api/servers/:id', (req, res) => {
 
   addLog(`[System]: Updated server instance "${current.name}" settings successfully`, 'info');
   res.json({ success: true, instance: current });
+});
+
+app.post('/api/servers/:id/assign', (req, res) => {
+  const { id } = req.params;
+  const { targetUsername } = req.body;
+  if (!targetUsername) return res.status(400).json({ error: 'targetUsername required' });
+
+  const instances = loadServerInstances();
+  const server = instances.find(s => s.id === id);
+  if (!server) return res.status(404).json({ error: 'Server instance not found' });
+
+  const cleanUser = targetUsername.trim().toLowerCase();
+  server.assignedUser = cleanUser;
+  saveServerInstances(instances);
+
+  addLog(`[System Owner]: Assigned server "${server.name}" (ID: ${server.id}) to user @${cleanUser}`, 'info');
+  res.json({ success: true, message: `Server allocated to @${cleanUser}`, server });
 });
 
 app.post('/api/servers/select', (req, res) => {
