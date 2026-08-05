@@ -1,0 +1,18 @@
+{
+  "serverName": "NTH",
+  "serverAddress": "ais-dev-hn2vj3nq7uz2vl26t7ambp-1058215627785.asia-southeast1.run.app:25565",
+  "logoUrl": "/uploads/custom-bg-1785759321252.jpg",
+  "bgImageUrl": "https://images.unsplash.com/photo-1627856013091-fed6e4e30025?q=80&w=2000&auto=format&fit=crop",
+  "bgOpacity": 70,
+  "bgBlur": 4,
+  "themeColor": "emerald",
+  "hudTransparent": true,
+  "customJavaPath": "",
+  "activeSoftware": "Paper",
+  "activeVersion": "1.21.4",
+  "loginLogoUrl": "",
+  "loginBgUrl": "",
+  "loginBgPreset": "cyber",
+  "watermarkImage": "/uploads/custom-bg-1785759314611.jpg",
+  "watermarkText": "Made by NightLord"
+}

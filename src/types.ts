@@ -73,6 +73,8 @@ export interface PanelSettings {
   loginLogoUrl?: string;
   loginBgUrl?: string;
   loginBgPreset?: 'cyber' | 'space' | 'emerald' | 'sunset' | 'custom';
+  watermarkImage?: string;
+  watermarkText?: string;
 }
 
 export interface ServerConfig {

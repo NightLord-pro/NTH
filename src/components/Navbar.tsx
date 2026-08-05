@@ -71,7 +71,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const currentInstance = serverInstances.find((s) => s.id === activeServerId) || {
     id: activeServerId,
-    name: settings.serverName || 'NightHost (NTH)',
+    name: settings.serverName || 'NTH',
     software: settings.activeSoftware || 'Paper',
     version: settings.activeVersion || '1.21.4',
     port: 25565,
@@ -159,7 +159,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5 flex-wrap">
               <h1 className="font-extrabold text-slate-100 text-sm sm:text-base tracking-tight truncate">
-                {settings.serverName || 'NightHost (NTH)'}
+                {settings.serverName || 'NTH'}
               </h1>
               <span className={`px-1.5 py-0.5 text-[9px] font-bold ${theme.bgActive} ${theme.textPrimary} border ${theme.borderActive} rounded uppercase tracking-wider flex items-center gap-0.5 shrink-0`}>
                 <Sparkles className={`w-2.5 h-2.5 ${theme.textPrimary}`} /> NTH
@@ -464,7 +464,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {renderLogo()}
           <div>
             <h1 className="font-bold text-slate-100 text-sm truncate max-w-[150px]">
-              {settings.serverName || 'NightHost (NTH)'}
+              {settings.serverName || 'NTH'}
             </h1>
             <div className={`flex items-center gap-1.5 text-[10px] font-mono ${theme.textPrimary}`}>
               <span>{serverState}</span>

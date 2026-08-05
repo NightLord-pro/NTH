@@ -81,16 +81,24 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         <div className="flex items-center gap-3">
           <div className="relative group shrink-0">
             <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-600 to-blue-500 rounded-xl blur-sm opacity-70 group-hover:opacity-100 transition duration-300"></div>
-            <div className="relative w-9 h-9 rounded-xl bg-slate-950 flex items-center justify-center border border-purple-500/40 text-white font-extrabold text-lg shadow-lg">
-              <span className="bg-gradient-to-tr from-purple-400 to-blue-400 bg-clip-text text-transparent">
-                N
-              </span>
-            </div>
+            {settings.logoUrl ? (
+              <img
+                src={settings.logoUrl}
+                alt="Application Logo"
+                className="relative w-9 h-9 rounded-xl object-cover border border-purple-500/40 shadow-lg bg-slate-950"
+              />
+            ) : (
+              <div className="relative w-9 h-9 rounded-xl bg-slate-950 flex items-center justify-center border border-purple-500/40 text-white font-extrabold text-lg shadow-lg">
+                <span className="bg-gradient-to-tr from-purple-400 to-blue-400 bg-clip-text text-transparent">
+                  N
+                </span>
+              </div>
+            )}
           </div>
           <div className="hidden sm:block min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="font-extrabold text-sm text-slate-100 tracking-tight">
-                {settings.serverName || 'NightHost (NTH)'}
+                {settings.serverName || 'NTH'}
               </span>
               <span className="px-1.5 py-0.5 text-[9px] font-black bg-purple-500/20 text-purple-300 border border-purple-500/40 rounded uppercase font-mono">
                 Enterprise

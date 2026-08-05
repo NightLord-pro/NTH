@@ -27,6 +27,7 @@ import { MemberNoServerGUI } from './components/MemberNoServerGUI';
 import { FirewallView } from './components/FirewallView';
 import { ScheduleManager } from './components/ScheduleManager';
 import { QuickGuideModal } from './components/QuickGuideModal';
+import { WatermarkBadge } from './components/WatermarkBadge';
 import { Command, Sparkles, Terminal, Play, RotateCw, Loader2 } from 'lucide-react';
 
 export default function App() {
@@ -80,7 +81,7 @@ export default function App() {
 
   // Panel settings state
   const [panelSettings, setPanelSettings] = useState<PanelSettings>({
-    serverName: 'NightHost (NTH)',
+    serverName: 'NTH',
     serverAddress: 'play.nighthost.in:25565',
     bgImageUrl: 'https://images.unsplash.com/photo-1627856013091-fed6e4e30025?q=80&w=2000&auto=format&fit=crop',
     bgOpacity: 70,
@@ -88,6 +89,8 @@ export default function App() {
     themeColor: 'emerald',
     activeSoftware: 'Paper',
     activeVersion: '1.21.4',
+    watermarkImage: 'https://kommodo.ai/i/dFiPHhi36O8VYtrYln6L',
+    watermarkText: 'Made by NightLord',
   });
 
   const fetchServerInstances = async () => {
@@ -158,6 +161,12 @@ export default function App() {
       // ignore
     }
   };
+
+  useEffect(() => {
+    if (panelSettings.serverName) {
+      document.title = panelSettings.serverName;
+    }
+  }, [panelSettings.serverName]);
 
   useEffect(() => {
     fetchStatus();
@@ -513,7 +522,10 @@ export default function App() {
                 )}
 
                 {activeTab === 'admin' && (
-                  <AdminPanel settings={panelSettings} />
+                  <AdminPanel
+                    settings={panelSettings}
+                    onSettingsUpdate={handleSettingsUpdate}
+                  />
                 )}
 
                 {activeTab === 'marketplace' && (
@@ -602,11 +614,17 @@ export default function App() {
       {/* Floating Action Button (FAB) for Quick Command Palette */}
       <button
         onClick={() => setCmdPaletteOpen(true)}
-        className="fixed bottom-6 right-6 z-40 p-3.5 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-full shadow-2xl shadow-purple-950/80 cursor-pointer transition-all active:scale-90 border border-purple-400/40 rgb-glow group"
+        className="fixed bottom-20 right-5 z-40 p-3.5 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-full shadow-2xl shadow-purple-950/80 cursor-pointer transition-all active:scale-90 border border-purple-400/40 rgb-glow group"
         title="Quick Command Palette (Ctrl + K)"
       >
         <Command className="w-5 h-5 transition-transform group-hover:rotate-12" />
       </button>
+
+      {/* Fixed Watermark Badge (Bottom-Right) */}
+      <WatermarkBadge
+        image={panelSettings.watermarkImage}
+        text={panelSettings.watermarkText}
+      />
     </div>
   );
 }

@@ -63,7 +63,7 @@ export const PanelSettingsView: React.FC<PanelSettingsViewProps> = ({
   settings,
   onSettingsUpdate,
 }) => {
-  const [serverName, setServerName] = useState(settings.serverName || 'NightHost (NTH)');
+  const [serverName, setServerName] = useState(settings.serverName || 'NTH');
   const [serverAddress, setServerAddress] = useState(settings.serverAddress && !settings.serverAddress.includes('run.app') ? settings.serverAddress : 'play.nighthost.in:25565');
   const [logoUrl, setLogoUrl] = useState(settings.logoUrl || '');
   const [bgImageUrl, setBgImageUrl] = useState(settings.bgImageUrl || '');
@@ -78,6 +78,13 @@ export const PanelSettingsView: React.FC<PanelSettingsViewProps> = ({
   const [loginBgPreset, setLoginBgPreset] = useState<'cyber' | 'space' | 'emerald' | 'sunset' | 'custom'>(settings.loginBgPreset || 'cyber');
   const [isUploadingLoginLogo, setIsUploadingLoginLogo] = useState(false);
   const [isUploadingLoginBg, setIsUploadingLoginBg] = useState(false);
+
+  // Watermark state
+  const [watermarkImage, setWatermarkImage] = useState(
+    settings.watermarkImage || localStorage.getItem('customWatermark') || 'https://kommodo.ai/i/dFiPHhi36O8VYtrYln6L'
+  );
+  const [watermarkText, setWatermarkText] = useState(settings.watermarkText || 'Made by NightLord');
+  const [isUploadingWatermark, setIsUploadingWatermark] = useState(false);
 
   const [isUploading, setIsUploading] = useState(false);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
@@ -101,7 +108,11 @@ export const PanelSettingsView: React.FC<PanelSettingsViewProps> = ({
       loginLogoUrl,
       loginBgUrl,
       loginBgPreset,
+      watermarkImage,
+      watermarkText,
     };
+
+    localStorage.setItem('customWatermark', watermarkImage);
 
     try {
       const res = await fetch('/api/panel/settings', {
@@ -477,7 +488,7 @@ export const PanelSettingsView: React.FC<PanelSettingsViewProps> = ({
                 </div>
               </div>
               <h5 className="text-xs font-black text-white font-mono uppercase tracking-wider">
-                {serverName || 'Minecraft Hosting Panel'}
+                {serverName || 'NTH'}
               </h5>
               <div className="px-3 py-1 bg-purple-600/80 text-white rounded-lg text-[10px] font-mono font-bold">
                 Sign In / Register Portal
@@ -561,6 +572,121 @@ export const PanelSettingsView: React.FC<PanelSettingsViewProps> = ({
                     <span>{p.name}</span>
                   </button>
                 ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Watermark Badge Configuration Card */}
+      <div className="bg-slate-900/60 backdrop-blur-xl border border-purple-500/30 rounded-2xl p-6 shadow-2xl space-y-5">
+        <h3 className="text-sm font-bold text-slate-100 flex items-center justify-between border-b border-slate-800/80 pb-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-purple-400" />
+            <span>Fixed Watermark Badge (Bottom-Right)</span>
+          </div>
+          <button
+            onClick={() => {
+              const defaultImg = 'https://kommodo.ai/i/dFiPHhi36O8VYtrYln6L';
+              const defaultTxt = 'Made by NightLord';
+              setWatermarkImage(defaultImg);
+              setWatermarkText(defaultTxt);
+              localStorage.removeItem('customWatermark');
+              if (onSettingsUpdate) onSettingsUpdate({ watermarkImage: defaultImg, watermarkText: defaultTxt });
+            }}
+            className="text-xs text-rose-400 hover:text-rose-300 transition-colors cursor-pointer font-medium flex items-center gap-1"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Reset Watermark</span>
+          </button>
+        </h3>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Custom Watermark Image Upload */}
+          <div className="space-y-3">
+            <label className="text-xs font-semibold text-slate-300 block">
+              Watermark Image URL or Device File
+            </label>
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-black border border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-md">
+                <img
+                  src={watermarkImage || 'https://kommodo.ai/i/dFiPHhi36O8VYtrYln6L'}
+                  alt="Watermark"
+                  className="w-8 h-8 object-contain"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = 'https://kommodo.ai/i/dFiPHhi36O8VYtrYln6L';
+                  }}
+                />
+              </div>
+              <input
+                type="text"
+                value={watermarkImage}
+                onChange={(e) => {
+                  setWatermarkImage(e.target.value);
+                  localStorage.setItem('customWatermark', e.target.value);
+                }}
+                placeholder="https://kommodo.ai/i/dFiPHhi36O8VYtrYln6L"
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-purple-500 font-mono"
+              />
+            </div>
+
+            <label className="w-full px-4 py-2.5 bg-purple-950/60 hover:bg-purple-900/80 text-purple-200 border border-purple-500/40 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg">
+              {isUploadingWatermark ? <RefreshCw className="w-4 h-4 animate-spin text-purple-400" /> : <Upload className="w-4 h-4 text-purple-400" />}
+              <span>{isUploadingWatermark ? 'Uploading Watermark...' : 'Upload Custom Watermark Image'}</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    setIsUploadingWatermark(true);
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                      if (reader.result) {
+                        const url = reader.result.toString();
+                        setWatermarkImage(url);
+                        localStorage.setItem('customWatermark', url);
+                        if (onSettingsUpdate) onSettingsUpdate({ watermarkImage: url });
+                      }
+                      setIsUploadingWatermark(false);
+                    };
+                    reader.readAsDataURL(file);
+                  }
+                }}
+                className="hidden"
+              />
+            </label>
+          </div>
+
+          {/* Custom Watermark Text Label & Preview */}
+          <div className="space-y-3">
+            <label className="text-xs font-semibold text-slate-300 block">
+              Watermark Display Text
+            </label>
+            <input
+              type="text"
+              value={watermarkText}
+              onChange={(e) => setWatermarkText(e.target.value)}
+              placeholder="Made by NightLord"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-purple-500 font-semibold"
+            />
+
+            <div className="pt-1">
+              <span className="text-[11px] text-slate-400 font-bold uppercase tracking-wider block mb-2">
+                Live Badge Corner Preview
+              </span>
+              <div className="p-3 bg-black/85 rounded-xl border border-white/20 inline-flex items-center gap-2.5 shadow-xl backdrop-blur-md">
+                <img
+                  src={watermarkImage || 'https://kommodo.ai/i/dFiPHhi36O8VYtrYln6L'}
+                  alt="Watermark"
+                  className="w-7 h-7 object-contain"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = 'https://kommodo.ai/i/dFiPHhi36O8VYtrYln6L';
+                  }}
+                />
+                <span className="text-xs font-bold text-white font-sans tracking-wide">
+                  {watermarkText || 'Made by NightLord'}
+                </span>
               </div>
             </div>
           </div>

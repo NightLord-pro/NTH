@@ -29,7 +29,7 @@ if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 // Panel settings persistence
 const settingsPath = path.join(SERVER_DIR, 'panel-settings.json');
 let panelSettings = {
-  serverName: 'NightHost (NTH)',
+  serverName: 'NTH',
   serverAddress: 'ais-dev-hn2vj3nq7uz2vl26t7ambp-1058215627785.asia-southeast1.run.app:25565',
   logoUrl: '',
   bgImageUrl: 'https://images.unsplash.com/photo-1627856013091-fed6e4e30025?q=80&w=2000&auto=format&fit=crop',
@@ -43,6 +43,8 @@ let panelSettings = {
   loginLogoUrl: '',
   loginBgUrl: '',
   loginBgPreset: 'cyber',
+  watermarkImage: 'https://kommodo.ai/i/dFiPHhi36O8VYtrYln6L',
+  watermarkText: 'Made by NightLord',
 };
 
 function loadSettings() {

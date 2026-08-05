@@ -116,7 +116,7 @@ export const MemberNoServerGUI: React.FC<MemberNoServerGUIProps> = ({
             </h1>
 
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-sans">
-              You are signed in to <strong className="text-white">{settings?.serverName || 'NightHost Panel'}</strong>. Your account currently has <span className="text-amber-400 font-mono font-bold">0 assigned Minecraft server instances</span>. Once assigned by an Owner or Administrator, all management features will automatically unlock for you.
+              You are signed in to <strong className="text-white">{settings?.serverName || 'NTH'}</strong>. Your account currently has <span className="text-amber-400 font-mono font-bold">0 assigned Minecraft server instances</span>. Once assigned by an Owner or Administrator, all management features will automatically unlock for you.
             </p>
           </div>
 

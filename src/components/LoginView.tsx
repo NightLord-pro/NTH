@@ -13,6 +13,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { PanelSettings } from '../types';
+import { WatermarkBadge } from './WatermarkBadge';
 
 interface LoginViewProps {
   settings: PanelSettings;
@@ -197,7 +198,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
           <div>
             <h1 className="text-2xl sm:text-3xl font-black text-white font-mono tracking-wider uppercase drop-shadow">
-              {settings?.serverName || 'Minecraft Hosting Panel'}
+              {settings?.serverName || 'NTH'}
             </h1>
             <p className="text-xs text-purple-300/80 font-mono tracking-widest uppercase mt-1">
               Enterprise Minecraft Host Portal
@@ -402,6 +403,11 @@ export const LoginView: React.FC<LoginViewProps> = ({
           </a>
         </div>
       </div>
+
+      <WatermarkBadge
+        image={settings?.watermarkImage}
+        text={settings?.watermarkText}
+      />
     </div>
   );
 };

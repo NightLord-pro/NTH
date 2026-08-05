@@ -103,7 +103,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
               <span className="text-xs text-slate-400 font-mono">Docker Cluster: Healthy</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              Welcome back to <span className="bg-gradient-to-r from-purple-400 via-blue-400 to-teal-300 bg-clip-text text-transparent">{settings.serverName || 'NightHost Panel'}</span>
+              Welcome back to <span className="bg-gradient-to-r from-purple-400 via-blue-400 to-teal-300 bg-clip-text text-transparent">{settings.serverName || 'NTH'}</span>
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 max-w-xl">
               High-performance PaperMC 1.21.11 Minecraft hosting environment with zero-latency Docker nodes, real-time JVM metrics & instant auto-scaling.
